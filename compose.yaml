@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: docker.io/library/postgres@sha256:0c49c0c906cb405ea65e70c284570fee91c7750ca9336369afc0edf4fce211db
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - continuity_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+      start_period: 2s
+
+volumes:
+  continuity_postgres_data:

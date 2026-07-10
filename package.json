@@ -8,6 +8,10 @@
     "node": ">=24.14.0"
   },
   "scripts": {
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down --volumes --remove-orphans",
+    "db:setup": "tsx scripts/db-setup.ts",
+    "test:db": "vitest run tests/database.test.ts --no-file-parallelism --bail=1",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
