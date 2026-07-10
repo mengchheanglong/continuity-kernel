@@ -12,19 +12,12 @@
 ## Current phase
 
 ```text
-T0 DOCUMENTATION CONTENT COMPLETE; BASELINE COMMIT PENDING
-T1 CONTRACT/VECTORS/MATRIX FROZEN; BASELINE COMMIT PENDING
-T2 CLOCK NOT STARTED
+T0 DOCUMENTATION COMPLETE — 66fe253
+T1 CONTRACT/VECTORS/MATRIX FROZEN
+T2 CLOCK RUNNING — HARD DEADLINE 2026-07-11T07:09:28Z
 ```
 
-Until a dated T2 start artifact records both the UTC timestamp and clean Git status, do not:
-
-- create `package.json`, a lockfile, source, tests, migrations, or build scripts;
-- install or update dependencies;
-- pull/start/configure PostgreSQL or DBOS for this repository;
-- count any implementation as outside the 12-hour benchmark.
-
-Research queries, registry lookups, document edits, and static verification do not start T2.
+The dated start artifact is `artifacts/2026-07-10-t2-start.md`. All implementation/setup time now counts. Stop at the hard deadline and record incomplete work honestly. Do not alter frozen expected outcomes to make the incumbent pass.
 
 ## Canonical rules
 

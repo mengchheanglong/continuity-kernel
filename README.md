@@ -5,15 +5,13 @@ A research-grade conformance harness for testing continuity properties across st
 ## Current status
 
 ```text
-T0 DOCUMENTATION SCAFFOLD: CONTENT COMPLETE; BASELINE COMMIT PENDING
-T1 CONTRACT/VECTORS/MATRIX: FROZEN; BASELINE COMMIT PENDING
-T2 12-HOUR IMPLEMENTATION CLOCK: NOT STARTED
+T0 DOCUMENTATION SCAFFOLD: COMPLETE — 66fe253
+T1 CONTRACT/VECTORS/MATRIX: FROZEN
+T2 12-HOUR IMPLEMENTATION CLOCK: RUNNING — DEADLINE 2026-07-11T07:09:28Z
 CUSTOM PERSISTENCE: NOT AUTHORIZED
 ```
 
-This repository currently contains documentation only. It intentionally has no package manifest, lockfile, dependencies, database configuration, migrations, build scripts, implementation source, or tests.
-
-The Git boundary is an unborn `main` branch with an uncommitted documentation baseline. T2 cannot start until that baseline is reviewed, committed, and the repository is clean.
+The documentation baseline is commit `66fe2539f1ff1b93e38663e7b27c32804d2d0fc4`. T2 started from clean status at `2026-07-10T19:09:28Z`; implementation evidence begins at `artifacts/2026-07-10-t2-start.md`.
 
 ## Research question
 
@@ -63,17 +61,7 @@ See `docs/conformance-vectors.md` for exact fixtures and outcomes.
 
 ## T2 clock boundary
 
-The 12-hour clock has **not** started.
-
-Before any of the following is created or run, record the UTC start timestamp and clean Git status under `artifacts/`:
-
-- package manifest or lockfile;
-- dependency installation;
-- PostgreSQL or DBOS configuration;
-- migration or build script;
-- implementation source or executable tests.
-
-After the timestamp, all setup, coding, debugging, and reruns count.
+The 12-hour clock started at `2026-07-10T19:09:28Z` and stops no later than `2026-07-11T07:09:28Z`. All package, dependency, PostgreSQL/DBOS setup, migration, script, source, test, debugging, and rerun time now counts. Expected vector outcomes remain frozen.
 
 ## Explicit exclusions
 
