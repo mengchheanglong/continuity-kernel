@@ -21,6 +21,8 @@
   "dependencies": {
     "@dbos-inc/dbos-sdk": "4.23.6",
     "@dbos-inc/postgres-datasource": "4.23.6",
+    "@restatedev/restate-sdk": "1.15.1",
+    "@restatedev/restate-sdk-clients": "1.15.1",
     "canonicalize": "2.1.0",
     "postgres": "3.4.9",
     "zod": "4.4.3"

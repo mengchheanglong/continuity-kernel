@@ -16,11 +16,11 @@
 T0 DOCUMENTATION COMPLETE — 66fe253
 T1 CONTRACT/VECTORS/MATRIX FROZEN
 T2 COMPLETE — DBOS_REJECTED_PENDING_ALTERNATIVE — 6ceb5b1
-T2B RESTATE PREFLIGHT FROZEN — IMPLEMENTATION CLOCK NOT STARTED
-CUSTOM PERSISTENCE NOT AUTHORIZED
+T2B COMPLETE — RESTATE_PASSES_V4
+CUSTOM PERSISTENCE PARKED
 ```
 
-The T2 decision is `artifacts/2026-07-11-t2-final.md`. The T2b authority is `docs/architecture/t2b-preflight.md`. Do not install, configure, pull/start, register, test, or implement Restate until a dated T2b start artifact is committed immediately before the first such action. Do not alter frozen expected outcomes to make any incumbent pass.
+The T2 decision is `artifacts/2026-07-11-t2-final.md`. The T2b preflight is `docs/architecture/t2b-preflight.md`; the completed evidence and decision are `artifacts/2026-07-11-t2b-final.md`. Restate/PostgreSQL advances to Gate D, where all six frozen vectors must run before foundation promotion. Do not alter frozen expected outcomes to make any incumbent pass.
 
 ## Canonical rules
 

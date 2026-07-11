@@ -16,5 +16,17 @@ services:
       retries: 30
       start_period: 2s
 
+  restate:
+    platform: linux/amd64
+    image: docker.restate.dev/restatedev/restate@sha256:9c9b8dc71581c02ce1d85dd9928ed2728b92a5a43499880c86a1fa8b01fab86a
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9070:9070"
+    volumes:
+      - continuity_restate_data:/restate-data
+
 volumes:
   continuity_postgres_data:
+  continuity_restate_data:

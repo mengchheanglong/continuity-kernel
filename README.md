@@ -8,11 +8,11 @@ A research-grade conformance harness for testing continuity properties across st
 T0 DOCUMENTATION SCAFFOLD: COMPLETE — 66fe253
 T1 CONTRACT/VECTORS/MATRIX: FROZEN
 T2 DBOS COUNTEREXAMPLE: COMPLETE — DBOS_REJECTED_PENDING_ALTERNATIVE — 6ceb5b1
-T2B RESTATE PREFLIGHT: FROZEN — IMPLEMENTATION CLOCK NOT STARTED
-CUSTOM PERSISTENCE: NOT AUTHORIZED
+T2B RESTATE: COMPLETE — RESTATE_PASSES_V4
+CUSTOM PERSISTENCE: PARKED
 ```
 
-The documentation baseline is commit `66fe2539f1ff1b93e38663e7b27c32804d2d0fc4`. T2 started clean at `2026-07-10T19:09:28Z` and ended with the evidence-backed decision in `artifacts/2026-07-11-t2-final.md`. T2b selects Restate as the bounded maintained alternative in `docs/architecture/t2b-preflight.md`; no alternative package, configuration, source, executable test, image pull/start, or deployment registration has begun.
+The documentation baseline is commit `66fe2539f1ff1b93e38663e7b27c32804d2d0fc4`. T2 started clean at `2026-07-10T19:09:28Z` and ended with the evidence-backed DBOS decision in `artifacts/2026-07-11-t2-final.md`. T2b started from commit `5cfc4b1065b407c7138d73d261e47319e9ec996d` at `2026-07-11T02:43:48Z` and completed within the frozen bounds with `RESTATE_PASSES_V4`; see `artifacts/2026-07-11-t2b-final.md`.
 
 ## Research question
 
@@ -40,6 +40,7 @@ Existing durable infrastructure must be tested before custom persistence is just
 8. `docs/architecture/preflight-decisions.md`
 9. `artifacts/2026-07-11-t2-final.md`
 10. `docs/architecture/t2b-preflight.md`
+11. `artifacts/2026-07-11-t2b-final.md`
 
 Mission authority and research evidence live in the sibling repository:
 
@@ -64,7 +65,7 @@ See `docs/conformance-vectors.md` for exact fixtures and outcomes.
 
 ## Clock boundaries
 
-The T2 clock closed with decision commit `6ceb5b1`. The six-hour T2b clock is not started. It begins immediately before the first alternative package/lockfile change, Restate configuration, executable source/test, image pull/start, deployment registration, or candidate probe. A dated start artifact and clean baseline commit must precede that action. Expected vector outcomes remain frozen.
+The T2 clock closed with decision commit `6ceb5b1`. T2b ran from `2026-07-11T02:43:48Z` to the decision at `2026-07-11T06:51:47Z`, within its six-hour deadline and 150-line candidate cap. Restate passed unchanged V4; Gate D must still port/run all six frozen vectors before any foundation promotion.
 
 ## Explicit exclusions
 

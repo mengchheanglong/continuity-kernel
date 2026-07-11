@@ -14,6 +14,12 @@ importers:
       '@dbos-inc/postgres-datasource':
         specifier: 4.23.6
         version: 4.23.6(@dbos-inc/dbos-sdk@4.23.6)
+      '@restatedev/restate-sdk':
+        specifier: 1.15.1
+        version: 1.15.1
+      '@restatedev/restate-sdk-clients':
+        specifier: 1.15.1
+        version: 1.15.1
       canonicalize:
         specifier: 2.1.0
         version: 2.1.0
@@ -419,6 +425,15 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
+
+  '@restatedev/restate-sdk-clients@1.15.1':
+    resolution: {integrity: sha512-8VBX2sbbJYGmbpS95Ara14BdRvoQjmR6zg/EYIxuoKbrIP7N+JeSmgk27YRh23jBaZX8xUMaDiDSAO5H/iuzAQ==}
+
+  '@restatedev/restate-sdk-core@1.15.1':
+    resolution: {integrity: sha512-qILG7EnpQng5pnWK+43wNRueYoPjDksFU4acnO7pKvOZrmjDBZomqmvP3qz2h4prFV1eTNH6YSqcR0FNhRoBIg==}
+
+  '@restatedev/restate-sdk@1.15.1':
+    resolution: {integrity: sha512-MYIBoggyx806UjHvIpoXr1wi9ivCrlHesOhxE/pW8bTXrvBBV6tN0EwhQR1126DmpkFw5qaVFMSJ4I2rr2Tlkw==}
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     resolution: {integrity: sha512-6o7ZLZK+BeenkZCFNDXqpbjw9bD6nuWonvS/lwQJp7NoVVxm6p3qE7qQ5jGuBjiFsgvqjD8mZAU5oWxTmbOeOg==}
@@ -1438,6 +1453,16 @@ snapshots:
   '@humanwhocodes/retry@0.4.3': {}
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
+
+  '@restatedev/restate-sdk-clients@1.15.1':
+    dependencies:
+      '@restatedev/restate-sdk-core': 1.15.1
+
+  '@restatedev/restate-sdk-core@1.15.1': {}
+
+  '@restatedev/restate-sdk@1.15.1':
+    dependencies:
+      '@restatedev/restate-sdk-core': 1.15.1
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     optional: true
