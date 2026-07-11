@@ -1,5 +1,5 @@
-import { fork, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { execFile, fork, type ChildProcess } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +9,7 @@ import { canonicalHash } from "../src/domain/canonical.js";
 import { buildCommitInput } from "../src/domain/request.js";
 import {
   cancelledRequest,
+  completedProjection,
   completedProjectionDigest,
   completedRequest,
   createAdminSql,
@@ -33,6 +34,19 @@ interface DecisionAudit {
   commandId: string; requestHash: string; actorId: string; authorizationGrantId: string;
   authorizationVersion: string; validatorVersion: number; decisionCode: string; payloadRef: string | null;
 }
+interface RestateVersionInfo {
+  version: string; min_admin_api_version: number; max_admin_api_version: number;
+}
+interface RestateServiceInfo {
+  name: string; ty: string; deployment_id: string; revision: number; public: boolean;
+  handlers: { name: string; ty: string; public: boolean }[];
+}
+interface RestateDeploymentInfo {
+  id: string; uri: string; protocol_type: string; http_version: string;
+  min_protocol_version: number; max_protocol_version: number; sdk_version: string;
+  services: { name: string; revision: number }[];
+}
+interface LogicalTextColumn { tableSchema: string; tableName: string; columnName: string }
 
 const admin = createAdminSql("continuity-kernel-gate-d-parent");
 const workers = new Set<Worker>();
@@ -176,6 +190,74 @@ async function queryRestate(query: string): Promise<{ rows: Record<string, unkno
   });
   if (!response.ok) throw new Error(`Restate query failed (${String(response.status)}): ${await response.text()}`);
   return await response.json() as { rows: Record<string, unknown>[] };
+}
+
+async function readRestateAdmin<T>(path: string): Promise<T> {
+  const response = await fetch(`http://127.0.0.1:9070${path}`);
+  if (!response.ok) throw new Error(`Restate Admin read failed (${String(response.status)})`);
+  return await response.json() as T;
+}
+
+const quoteIdentifier = (value: string) => `"${value.replaceAll('"', '""')}"`;
+
+async function readLogicalApplicationText(): Promise<string[]> {
+  const columns = await admin<LogicalTextColumn[]>`
+    SELECT c.table_schema AS "tableSchema", c.table_name AS "tableName",
+      c.column_name AS "columnName"
+    FROM information_schema.columns AS c
+    JOIN information_schema.tables AS t
+      ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+    WHERE t.table_type = 'BASE TABLE'
+      AND c.table_schema NOT IN ('pg_catalog', 'information_schema')
+      AND c.table_schema NOT LIKE 'pg_toast%'
+      AND NOT (c.table_schema = 'deletable_payload' AND c.table_name = 'objects')
+      AND c.data_type IN ('text', 'character varying', 'character', 'json', 'jsonb')
+    ORDER BY c.table_schema, c.table_name, c.ordinal_position
+  `;
+  const values: string[] = [];
+  for (const column of columns) {
+    const schema = quoteIdentifier(column.tableSchema);
+    const table = quoteIdentifier(column.tableName);
+    const name = quoteIdentifier(column.columnName);
+    const rows = await admin.unsafe<{ value: string }[]>(
+      `SELECT ${name}::text AS value FROM ${schema}.${table} WHERE ${name} IS NOT NULL`,
+    );
+    for (const row of rows) values.push(row.value);
+  }
+  return values;
+}
+
+function privatePayloadRepresentations(sentinel: string): string[] {
+  const sha256Hex = createHash("sha256").update(sentinel, "utf8").digest("hex");
+  const sha256Base64Url = createHash("sha256").update(sentinel, "utf8").digest("base64url");
+  return [sentinel, sha256Hex, sha256Base64Url]
+    .flatMap((value) => [value, Buffer.from(value, "utf8").toString("hex")])
+    .map((value) => value.toLowerCase());
+}
+
+function assertNoPrivatePayload(surface: string, values: string[], representations: string[]): void {
+  const containsPrivateMaterial = values.some((value) => {
+    const normalized = value.toLowerCase();
+    return representations.some((representation) => normalized.includes(representation));
+  });
+  if (containsPrivateMaterial) throw new Error(`${surface} contains forbidden private payload material`);
+}
+
+async function readRestateContainerLogs(since: string): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    execFile(
+      "docker",
+      ["compose", "logs", "--no-color", "--since", since, "restate"],
+      { cwd: process.cwd(), encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error !== null) {
+          reject(new Error("Restate container logs could not be inspected"));
+          return;
+        }
+        resolve(`${stdout}${stderr}`);
+      },
+    );
+  });
 }
 
 async function acquireSnapshotBarrier(): Promise<{
@@ -786,6 +868,117 @@ describe.sequential("Gate D Restate foundation vectors", () => {
     expect(rows.map((row) => row.namespaceId).sort()).toEqual([fixture.namespaceId, secondNamespace].sort());
   }, 120_000);
 
+  it("GateD-V5 returns the exact frozen projection digest after endpoint restart", async () => {
+    const commandId = id("v5-restart-digest-command");
+    let worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+    const initial = await submitRestateCommand(
+      commandId,
+      completedRequest,
+      id("v5-restart-digest-initial-workflow"),
+    );
+    const expected = {
+      status: "accepted",
+      code: "ACCEPTED",
+      namespaceId: fixture.namespaceId,
+      caseId: fixture.caseId,
+      commandId,
+      requestHash: requestHashes.completed,
+      authorizationVersion: fixture.authorizationVersion,
+      caseVersion: "4",
+      payloadRef: fixture.payloadRef,
+      projectionSchemaVersion: 1,
+      projection: completedProjection,
+      projectionDigest: completedProjectionDigest,
+    };
+    expect(initial).toEqual(expected);
+    expect(canonicalHash(initial.projection)).toBe(completedProjectionDigest);
+
+    await kill(worker);
+    worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+    const afterRestart = await submitRestateCommand(
+      commandId,
+      completedRequest,
+      id("v5-restart-digest-replay-workflow"),
+    );
+    expect(afterRestart).toEqual(expected);
+    expect(canonicalHash(afterRestart.projection)).toBe(completedProjectionDigest);
+    const storedReceipt = await readStoredReceipt(fixture.namespaceId, commandId);
+    expect({ ...storedReceipt, projectionDigest: canonicalHash(storedReceipt.projection) }).toEqual(expected);
+    expect(canonicalHash(storedReceipt.projection)).toBe(completedProjectionDigest);
+    expect(await readDomainCounts(admin)).toEqual({ receipts: 1, acceptedHistory: 1 });
+    expect(await readDomainState(admin)).toEqual({
+      version: "4", status: "resolved", commitmentDeadline: "2026-07-11 12:00:00+00",
+      commitmentStatus: "completed", payloadRef: fixture.payloadRef,
+    });
+    const history = await admin<{ commandId: string; position: string }[]>`
+      SELECT command_id AS "commandId", position::text AS position
+      FROM continuity.accepted_history
+      WHERE namespace_id = ${fixture.namespaceId} AND case_id = ${fixture.caseId}
+    `;
+    expect(history).toEqual([{ commandId, position: "4" }]);
+  }, 120_000);
+
+  it("GateD-V5 records supported Restate service/deployment version through public introspection", async () => {
+    const workflowId = id("v5-public-version-workflow");
+    const commandId = id("v5-public-version-command");
+    const worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+
+    const service = await readRestateAdmin<RestateServiceInfo>("/services/ContinuityCommitT2bV1");
+    const deployment = await readRestateAdmin<RestateDeploymentInfo>(
+      `/deployments/${encodeURIComponent(service.deployment_id)}`,
+    );
+    const version = await readRestateAdmin<RestateVersionInfo>("/version");
+    const result = await submitRestateCommand(commandId, completedRequest, workflowId);
+    const invocation = await queryRestate(
+      `select pinned_deployment_id, pinned_service_protocol_version, created_using_restate_version,`
+      + ` status, completion_result, completion_failure is null as has_no_completion_failure`
+      + ` from sys_invocation where target_service_name = 'ContinuityCommitT2bV1'`
+      + ` and target_service_key = ${restateString(workflowId)}`,
+    );
+    const deployedService = deployment.services.find(({ name }) => name === "ContinuityCommitT2bV1");
+    const expectedUri = new URL(
+      process.env.CK_RESTATE_DEPLOYMENT_URI ?? "http://host.docker.internal:9080",
+    ).toString();
+
+    expect(version).toMatchObject({ version: "1.7.2", min_admin_api_version: 2, max_admin_api_version: 4 });
+    expect(service).toMatchObject({
+      name: "ContinuityCommitT2bV1", ty: "Workflow", public: true,
+      deployment_id: deployment.id,
+    });
+    expect(Number.isSafeInteger(service.revision) && service.revision > 0).toBe(true);
+    expect(service.handlers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "run", ty: "Workflow", public: true }),
+    ]));
+    expect(deployment).toMatchObject({
+      id: service.deployment_id,
+      uri: expectedUri,
+      protocol_type: "BidiStream",
+      http_version: "HTTP/2.0",
+      min_protocol_version: 5,
+      max_protocol_version: 7,
+      sdk_version: "restate-sdk-typescript/1.15.1",
+    });
+    expect(deployedService).toMatchObject({ name: service.name, revision: service.revision });
+    expect(invocation.rows).toEqual([expect.objectContaining({
+      pinned_deployment_id: service.deployment_id,
+      pinned_service_protocol_version: 6,
+      created_using_restate_version: "1.7.2",
+      status: "completed",
+      completion_result: "success",
+      has_no_completion_failure: true,
+    })]);
+    expect(result).toMatchObject({
+      status: "accepted", code: "ACCEPTED", commandId,
+      requestHash: requestHashes.completed, projectionDigest: completedProjectionDigest,
+    });
+  }, 120_000);
+
   it("GateD-V5 rejects undeclared optional payload bytes before workflow submission", async () => {
     const sentinel = "CK_PRIVATE_PAYLOAD_SENTINEL_20260711_A9F4C2E7";
     const workflowId = id("v5-undeclared-payload");
@@ -923,5 +1116,127 @@ describe.sequential("Gate D Restate foundation vectors", () => {
       (input) => ({ ...input, runtimeApplicationVersion: "continuity-kernel-restate-gate-d-v2" }),
       "UNSUPPORTED_RUNTIME_APPLICATION_VERSION",
     );
+  }, 120_000);
+
+  it("GateD-V6 erases optional payload bytes without application, journal, metadata, result, error, or log leakage", async () => {
+    const sentinel = "CK_PRIVATE_PAYLOAD_SENTINEL_20260711_A9F4C2E7";
+    const representations = privatePayloadRepresentations(sentinel);
+    const workflowId = id("v6-erasure-workflow");
+    const commandId = id("v6-erasure-command");
+    await admin.unsafe("CREATE SCHEMA IF NOT EXISTS deletable_payload");
+    await admin.unsafe(
+      "CREATE TABLE IF NOT EXISTS deletable_payload.objects (payload_ref text PRIMARY KEY, body text NOT NULL)",
+    );
+    await admin.unsafe("DELETE FROM deletable_payload.objects");
+
+    const worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+    const logSince = new Date().toISOString();
+    await admin`
+      INSERT INTO deletable_payload.objects (payload_ref, body)
+      VALUES (${fixture.payloadRef}, ${sentinel})
+    `;
+    const payloadRows = await admin<{ payloadRef: string; body: string }[]>`
+      SELECT payload_ref AS "payloadRef", body FROM deletable_payload.objects
+      WHERE payload_ref = ${fixture.payloadRef}
+    `;
+    if (payloadRows.length !== 1 || payloadRows[0]?.payloadRef !== fixture.payloadRef
+      || payloadRows[0].body !== sentinel) {
+      throw new Error("Deletable payload store did not contain the exact synthetic fixture");
+    }
+    assertNoPrivatePayload(
+      "logical application storage before submission",
+      await readLogicalApplicationText(),
+      representations,
+    );
+
+    let deletedRows = 0;
+    const result = await (async () => {
+      try {
+        return await submitRestateCommand(commandId, completedRequest, workflowId);
+      } finally {
+        const deleted = await admin<{ payloadRef: string }[]>`
+          DELETE FROM deletable_payload.objects WHERE payload_ref = ${fixture.payloadRef}
+          RETURNING payload_ref AS "payloadRef"
+        `;
+        deletedRows = deleted.length;
+      }
+    })();
+    expect(deletedRows).toBe(1);
+    const remaining = await admin<{ count: number }[]>`
+      SELECT count(*)::integer AS count FROM deletable_payload.objects
+      WHERE payload_ref = ${fixture.payloadRef}
+    `;
+    expect(remaining).toEqual([{ count: 0 }]);
+
+    const applicationText = await readLogicalApplicationText();
+    const invocation = await queryRestate(
+      `select *, completion_failure is null as has_no_completion_failure`
+      + ` from sys_invocation where target_service_name = 'ContinuityCommitT2bV1'`
+      + ` and target_service_key = ${restateString(workflowId)}`,
+    );
+    const journal = await queryRestate(
+      `select raw, entry_json, entry_lite_json from sys_journal`
+      + ` where id in (select id from sys_invocation`
+      + ` where target_service_name = 'ContinuityCommitT2bV1'`
+      + ` and target_service_key = ${restateString(workflowId)}) order by index`,
+    );
+    const containerLogs = await readRestateContainerLogs(logSince);
+    const storedReceipt = await readStoredReceipt(fixture.namespaceId, commandId);
+    const history = await admin<{
+      commandId: string; requestHash: string; position: string; payloadRef: string;
+    }[]>`
+      SELECT command_id AS "commandId", request_hash AS "requestHash",
+        position::text AS position, payload_ref AS "payloadRef"
+      FROM continuity.accepted_history
+      WHERE namespace_id = ${fixture.namespaceId} AND case_id = ${fixture.caseId}
+    `;
+
+    expect(result).toEqual({
+      status: "accepted", code: "ACCEPTED", namespaceId: fixture.namespaceId,
+      caseId: fixture.caseId, commandId, requestHash: requestHashes.completed,
+      authorizationVersion: fixture.authorizationVersion, caseVersion: "4",
+      payloadRef: fixture.payloadRef, projectionSchemaVersion: 1,
+      projection: completedProjection, projectionDigest: completedProjectionDigest,
+    });
+    expect(storedReceipt).toEqual({
+      status: "accepted", code: "ACCEPTED", namespaceId: fixture.namespaceId,
+      caseId: fixture.caseId, commandId, requestHash: requestHashes.completed,
+      authorizationVersion: fixture.authorizationVersion, caseVersion: "4",
+      payloadRef: fixture.payloadRef, projectionSchemaVersion: 1,
+      projection: completedProjection,
+    });
+    expect(canonicalHash(storedReceipt.projection)).toBe(completedProjectionDigest);
+    expect(history).toEqual([{
+      commandId, requestHash: requestHashes.completed, position: "4", payloadRef: fixture.payloadRef,
+    }]);
+    expect(await readDomainCounts(admin)).toEqual({ receipts: 1, acceptedHistory: 1 });
+    expect(await readDomainState(admin)).toEqual({
+      version: "4", status: "resolved", commitmentDeadline: "2026-07-11 12:00:00+00",
+      commitmentStatus: "completed", payloadRef: fixture.payloadRef,
+    });
+    expect(invocation.rows).toHaveLength(1);
+    expect(invocation.rows[0]).toMatchObject({
+      target_service_name: "ContinuityCommitT2bV1", target_service_key: workflowId,
+      target_handler_name: "run", target_service_ty: "workflow", invoked_by: "ingress",
+      created_using_restate_version: "1.7.2", status: "completed",
+      completion_result: "success", has_no_completion_failure: true,
+    });
+    expect(typeof invocation.rows[0]?.pinned_deployment_id).toBe("string");
+    expect(journal.rows.length).toBeGreaterThan(0);
+
+    assertNoPrivatePayload("logical application storage after erasure", applicationText, representations);
+    assertNoPrivatePayload("supported Restate invocation metadata and failure", [
+      JSON.stringify(invocation.rows),
+    ], representations);
+    assertNoPrivatePayload("supported Restate raw and JSON journal", [
+      JSON.stringify(journal.rows),
+    ], representations);
+    assertNoPrivatePayload("approved result and stored receipt", [
+      JSON.stringify(result), JSON.stringify(storedReceipt), JSON.stringify(history),
+    ], representations);
+    assertNoPrivatePayload("worker stdout and stderr", worker.logs, representations);
+    assertNoPrivatePayload("Restate container logs", [containerLogs], representations);
   }, 120_000);
 });
