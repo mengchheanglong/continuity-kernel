@@ -218,4 +218,12 @@ describe.sequential("Gate D Restate foundation vectors", () => {
       "UNSUPPORTED_PROJECTION_SCHEMA_VERSION",
     );
   }, 120_000);
+
+  it("GateD-V5 fails explicitly for unsupported serializer version at direct ingress", async () => {
+    await expectUnsupportedVersion(
+      "v5-unsupported-serializer",
+      (input) => ({ ...input, serializerVersion: "rfc8785-sha256-base64url-nopad-v2" }),
+      "UNSUPPORTED_SERIALIZER_VERSION",
+    );
+  }, 120_000);
 });
