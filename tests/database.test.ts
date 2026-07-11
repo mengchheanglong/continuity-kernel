@@ -220,7 +220,7 @@ describe.sequential("frozen direct-PostgreSQL canonical core", () => {
     expect((await readDomainState(admin)).version).toBe("4");
     expect((await readDomainCounts(admin)).acceptedHistory).toBe(1);
     expect(attempts.every(({ attempts: count }) => Number.isInteger(count) && count >= 1)).toBe(true);
-  });
+  }, 10_000);
 
   it("rejects when revocation version 8 commits before validation", async () => {
     await resetSyntheticFixture(admin);

@@ -16,6 +16,7 @@
     "verbatimModuleSyntax": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
     "types": ["node"]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]

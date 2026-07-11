@@ -12,7 +12,8 @@
     "db:down": "docker compose down --volumes --remove-orphans",
     "db:setup": "tsx scripts/db-setup.ts",
     "test:db": "vitest run tests/database.test.ts --no-file-parallelism --bail=1",
-    "test": "vitest run",
+    "test:dbos": "vitest run tests/dbos.test.ts tests/dbos-crash.test.ts --no-file-parallelism --bail=1",
+    "test": "vitest run --no-file-parallelism",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "build": "tsc --noEmit"

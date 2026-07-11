@@ -49,6 +49,7 @@ DECLARE
   v_receipt continuity.command_receipts%ROWTYPE; v_grant continuity.authorization_grants%ROWTYPE;
   v_case continuity.cases%ROWTYPE; v_code text; v_result jsonb; v_projection jsonb; v_new_version bigint;
 BEGIN
+  IF pg_catalog.current_setting('continuity.test_failpoint', true) = 'retry_forever' THEN RAISE EXCEPTION USING ERRCODE='40001'; END IF;
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(pg_catalog.length(v_namespace)::text || ':' || v_namespace || p_command_id, 0));
   SELECT * INTO v_receipt FROM continuity.command_receipts
     WHERE namespace_id = v_namespace AND command_id = p_command_id;
@@ -99,6 +100,7 @@ BEGIN
   v_new_version := v_case.version + 1;
   UPDATE continuity.cases SET version=v_new_version,status='resolved',commitment_deadline=v_deadline::timestamptz,
     commitment_status=v_resolution,payload_ref=v_payload_ref WHERE namespace_id=v_namespace AND case_id=v_case_id;
+  IF pg_catalog.current_setting('continuity.test_failpoint', true) = 'after_write' THEN PERFORM pg_catalog.pg_sleep(30); END IF;
   v_projection := pg_catalog.jsonb_build_object('projectionSchemaVersion',p_projection_schema_version,'namespaceId',v_namespace,
     'case',pg_catalog.jsonb_build_object('caseId',v_case_id,'ownerAgentId',v_case.owner_agent_id,'version',v_new_version::text,
       'status','resolved','commitment',pg_catalog.jsonb_build_object('deadline',v_deadline,'status',v_resolution)));

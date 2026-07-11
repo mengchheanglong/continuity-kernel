@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 
+import { PostgresDataSource } from "@dbos-inc/postgres-datasource";
 import postgres from "postgres";
 
 const admin = postgres({
@@ -79,6 +80,19 @@ async function setup(): Promise<void> {
       await sql.unsafe("SET LOCAL ROLE continuity_owner");
       await sql.unsafe(migration);
     });
+    await PostgresDataSource.initializeDBOSSchema({
+      host: "127.0.0.1",
+      port: 55432,
+      database: "continuity_app_db",
+      user: "postgres",
+      password: "postgres",
+    });
+    await domainAdmin.unsafe(`
+      REVOKE ALL ON SCHEMA dbos FROM PUBLIC;
+      REVOKE ALL ON ALL TABLES IN SCHEMA dbos FROM PUBLIC;
+      GRANT USAGE ON SCHEMA dbos TO continuity_app;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON dbos.transaction_completion TO continuity_app;
+    `);
   } finally {
     await domainAdmin.end({ timeout: 5 });
   }
