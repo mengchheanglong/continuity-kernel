@@ -99,6 +99,43 @@ async function queryRestate(query: string): Promise<{ rows: Record<string, unkno
   return await response.json() as { rows: Record<string, unknown>[] };
 }
 
+async function expectUnsupportedVersion(
+  label: string,
+  mutate: (input: ReturnType<typeof buildCommitInput>) => unknown,
+  expectedCode: string,
+): Promise<void> {
+  const workflowId = id(label);
+  const commandId = id(`${label}-command`);
+  const input = mutate(buildCommitInput(commandId, completedRequest));
+  const worker = spawnWorker();
+  await waitMessage(worker, (message) => message.type === "ready");
+  await registerDeployment();
+
+  const response = await fetch(
+    `http://127.0.0.1:8080/restate/call/ContinuityCommitT2bV1/${encodeURIComponent(workflowId)}/run`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) },
+  );
+  const responseText = await response.text();
+  const invocations = await queryRestate(
+    `select status, completion_result, completion_failure from sys_invocation where target_service_name = 'ContinuityCommitT2bV1' and target_service_key = '${workflowId}'`,
+  );
+  const journal = JSON.stringify((await queryRestate(
+    `select entry_json from sys_journal where id in (select id from sys_invocation where target_service_name = 'ContinuityCommitT2bV1' and target_service_key = '${workflowId}')`,
+  )).rows);
+  const failure = String(invocations.rows[0]?.completion_failure);
+
+  expect.soft(response.status).toBe(400);
+  expect.soft(responseText).toContain(expectedCode);
+  expect.soft(responseText).not.toContain(commandId);
+  expect.soft(invocations.rows).toHaveLength(1);
+  expect.soft(invocations.rows[0]).toMatchObject({ status: "completed", completion_result: "failure" });
+  expect.soft(failure).toContain(expectedCode);
+  expect.soft(failure).not.toContain(commandId);
+  expect.soft(journal).not.toContain("canonical commit");
+  expect.soft(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
+  expect.soft(await readDomainState(admin)).toMatchObject({ version: "3", status: "open", payloadRef: null });
+}
+
 describe.sequential("Gate D Restate foundation vectors", () => {
   it("GateD-V5 rejects undeclared optional payload bytes before workflow submission", async () => {
     const sentinel = "CK_PRIVATE_PAYLOAD_SENTINEL_20260711_A9F4C2E7";
@@ -143,29 +180,18 @@ describe.sequential("Gate D Restate foundation vectors", () => {
   }, 120_000);
 
   it("GateD-V5 fails explicitly for unsupported domain schema version at direct ingress", async () => {
-    const workflowId = id("v5-unsupported-domain");
-    const commandId = id("v5-unsupported-domain-command");
-    const input = { ...buildCommitInput(commandId, completedRequest), domainSchemaVersion: 2 };
-    const worker = spawnWorker();
-    await waitMessage(worker, (message) => message.type === "ready");
-    await registerDeployment();
-
-    const response = await fetch(
-      `http://127.0.0.1:8080/restate/call/ContinuityCommitT2bV1/${encodeURIComponent(workflowId)}/run`,
-      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) },
+    await expectUnsupportedVersion(
+      "v5-unsupported-domain",
+      (input) => ({ ...input, domainSchemaVersion: 2 }),
+      "UNSUPPORTED_DOMAIN_SCHEMA_VERSION",
     );
-    const responseText = await response.text();
-    const invocations = await queryRestate(
-      `select status, completion_result, completion_failure from sys_invocation where target_service_name = 'ContinuityCommitT2bV1' and target_service_key = '${workflowId}'`,
-    );
+  }, 120_000);
 
-    expect.soft(response.status).toBe(400);
-    expect.soft(responseText).toContain("UNSUPPORTED_DOMAIN_SCHEMA_VERSION");
-    expect.soft(responseText).not.toContain(commandId);
-    expect.soft(invocations.rows).toHaveLength(1);
-    expect.soft(invocations.rows[0]).toMatchObject({ status: "completed", completion_result: "failure" });
-    expect.soft(String(invocations.rows[0]?.completion_failure)).toContain("UNSUPPORTED_DOMAIN_SCHEMA_VERSION");
-    expect.soft(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
-    expect.soft(await readDomainState(admin)).toMatchObject({ version: "3", status: "open", payloadRef: null });
+  it("GateD-V5 fails explicitly for unsupported request-hash schema version at direct ingress", async () => {
+    await expectUnsupportedVersion(
+      "v5-unsupported-request-hash",
+      (input) => ({ ...input, request: { ...input.request, requestHashSchemaVersion: 2 } }),
+      "UNSUPPORTED_REQUEST_HASH_SCHEMA_VERSION",
+    );
   }, 120_000);
 });

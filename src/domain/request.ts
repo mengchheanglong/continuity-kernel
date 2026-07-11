@@ -29,7 +29,7 @@ export const commitInputSchema = z.strictObject({
 
 export type CommitInput = z.infer<typeof commitInputSchema>;
 
-type RequestValidationCode = "INVALID_REQUEST_SCHEMA" | "UNSUPPORTED_DOMAIN_SCHEMA_VERSION";
+type RequestValidationCode = "INVALID_REQUEST_SCHEMA" | "UNSUPPORTED_DOMAIN_SCHEMA_VERSION" | "UNSUPPORTED_REQUEST_HASH_SCHEMA_VERSION";
 
 export class RequestValidationError extends Error {
   constructor(readonly code: RequestValidationCode = "INVALID_REQUEST_SCHEMA") { super(); this.message = code; this.name = "RequestValidationError"; }
@@ -40,6 +40,10 @@ export function parseCommitInput(input: unknown): CommitInput {
       && (input as { domainSchemaVersion: unknown }).domainSchemaVersion !== 1) {
     throw new RequestValidationError("UNSUPPORTED_DOMAIN_SCHEMA_VERSION");
   }
+  const request = typeof input === "object" && input !== null && !Array.isArray(input) && Object.hasOwn(input, "request")
+    ? (input as { request: unknown }).request : undefined;
+  if (typeof request === "object" && request !== null && !Array.isArray(request) && Object.hasOwn(request, "requestHashSchemaVersion")
+      && (request as { requestHashSchemaVersion: unknown }).requestHashSchemaVersion !== 1) throw new RequestValidationError("UNSUPPORTED_REQUEST_HASH_SCHEMA_VERSION");
   const parsed = commitInputSchema.safeParse(input);
   if (!parsed.success) throw new RequestValidationError();
   return parsed.data;
