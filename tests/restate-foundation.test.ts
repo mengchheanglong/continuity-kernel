@@ -9,13 +9,20 @@ import { buildCommitInput } from "../src/domain/request.js";
 import {
   completedRequest,
   createAdminSql,
+  fixture,
   readDomainCounts,
   readDomainState,
+  readGrant,
   resetSyntheticFixture,
+  revokeGrant,
 } from "./db-fixture.js";
 
 interface WorkerMessage { type: string; error?: string }
 interface Worker { child: ChildProcess; logs: string[]; messages: WorkerMessage[] }
+interface DecisionAudit {
+  commandId: string; requestHash: string; actorId: string; authorizationGrantId: string;
+  authorizationVersion: string; validatorVersion: number; decisionCode: string; payloadRef: string | null;
+}
 
 const admin = createAdminSql("continuity-kernel-gate-d-parent");
 const workers = new Set<Worker>();
@@ -99,6 +106,15 @@ async function queryRestate(query: string): Promise<{ rows: Record<string, unkno
   return await response.json() as { rows: Record<string, unknown>[] };
 }
 
+async function readDecisionAudits(): Promise<DecisionAudit[]> {
+  return await admin<DecisionAudit[]>`
+    SELECT command_id AS "commandId", request_hash AS "requestHash", actor_id AS "actorId",
+      authorization_grant_id AS "authorizationGrantId", authorization_version AS "authorizationVersion",
+      validator_version AS "validatorVersion", decision_code AS "decisionCode", payload_ref AS "payloadRef"
+    FROM continuity.decision_audit ORDER BY audit_id
+  `;
+}
+
 async function expectDirectTerminal(
   label: string,
   mutate: (input: ReturnType<typeof buildCommitInput>) => unknown,
@@ -142,6 +158,50 @@ async function expectDirectTerminal(
 }
 
 describe.sequential("Gate D Restate foundation vectors", () => {
+  it("GateD-V1A rejects an out-of-scope actor through Restate", async () => {
+    const commandId = id("v1a-out-of-scope-command");
+    const request = { ...structuredClone(completedRequest), actorId: fixture.otherAgentId };
+    const worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+
+    const result = await submitRestateCommand(commandId, request, id("v1a-out-of-scope-workflow"));
+
+    expect.soft(result).toMatchObject({ status: "rejected", code: "AUTHORIZATION_DENIED", commandId });
+    expect.soft(await readDomainCounts(admin)).toEqual({ receipts: 1, acceptedHistory: 0 });
+    expect.soft(await readDomainState(admin)).toEqual({
+      version: "3", status: "open", commitmentDeadline: null, commitmentStatus: null, payloadRef: null,
+    });
+    expect.soft(await readDecisionAudits()).toEqual([{
+      commandId, requestHash: result.requestHash, actorId: fixture.otherAgentId,
+      authorizationGrantId: fixture.authorizationGrantId, authorizationVersion: fixture.authorizationVersion,
+      validatorVersion: 1, decisionCode: "AUTHORIZATION_DENIED", payloadRef: fixture.payloadRef,
+    }]);
+  }, 120_000);
+
+  it("GateD-V1B rejects after grant version 8 commits before Restate validation", async () => {
+    const commandId = id("v1b-revocation-first-command");
+    const worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+    await revokeGrant(admin);
+
+    const result = await submitRestateCommand(commandId, completedRequest, id("v1b-revocation-first-workflow"));
+
+    expect.soft(result).toMatchObject({ status: "rejected", commandId });
+    expect.soft(["AUTHORIZATION_REVOKED", "AUTHORIZATION_VERSION_CONFLICT"]).toContain(result.code);
+    expect.soft(await readGrant(admin)).toEqual({ version: "8", isRevoked: true });
+    expect.soft(await readDomainCounts(admin)).toEqual({ receipts: 1, acceptedHistory: 0 });
+    expect.soft(await readDomainState(admin)).toEqual({
+      version: "3", status: "open", commitmentDeadline: null, commitmentStatus: null, payloadRef: null,
+    });
+    expect.soft(await readDecisionAudits()).toEqual([{
+      commandId, requestHash: result.requestHash, actorId: fixture.ownerAgentId,
+      authorizationGrantId: fixture.authorizationGrantId, authorizationVersion: fixture.authorizationVersion,
+      validatorVersion: 1, decisionCode: result.code, payloadRef: fixture.payloadRef,
+    }]);
+  }, 120_000);
+
   it("GateD-V5 rejects undeclared optional payload bytes before workflow submission", async () => {
     const sentinel = "CK_PRIVATE_PAYLOAD_SENTINEL_20260711_A9F4C2E7";
     const workflowId = id("v5-undeclared-payload");
