@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { canonicalHash } from "./canonical.js";
+
 const nonemptyString = z.string().min(1);
 const decimalString = z.string().regex(/^(0|[1-9]\d*)$/u);
 
@@ -28,11 +30,13 @@ export const commitInputSchema = z.strictObject({
 
 export type CommitInput = z.infer<typeof commitInputSchema>;
 
-type RequestValidationCode = "INVALID_REQUEST_SCHEMA" | "UNSUPPORTED_DOMAIN_SCHEMA_VERSION" | "UNSUPPORTED_AUTHORIZATION_MODEL_VERSION" | "UNSUPPORTED_REQUEST_HASH_SCHEMA_VERSION" | "UNSUPPORTED_VALIDATOR_VERSION" | "UNSUPPORTED_PROJECTION_SCHEMA_VERSION" | "UNSUPPORTED_SERIALIZER_VERSION" | "UNSUPPORTED_RUNTIME_APPLICATION_VERSION";
+type RequestValidationCode = "INVALID_REQUEST_SCHEMA" | "INVALID_CANONICAL_REQUEST" | "UNSUPPORTED_DOMAIN_SCHEMA_VERSION" | "UNSUPPORTED_AUTHORIZATION_MODEL_VERSION" | "UNSUPPORTED_REQUEST_HASH_SCHEMA_VERSION" | "UNSUPPORTED_VALIDATOR_VERSION" | "UNSUPPORTED_PROJECTION_SCHEMA_VERSION" | "UNSUPPORTED_SERIALIZER_VERSION" | "UNSUPPORTED_RUNTIME_APPLICATION_VERSION";
 
 export class RequestValidationError extends Error {
   constructor(readonly code: RequestValidationCode = "INVALID_REQUEST_SCHEMA") { super(); this.message = code; this.name = "RequestValidationError"; }
 }
+
+export function canonicalRequestHash(request: ResolveCaseRequest): string { try { return canonicalHash(request); } catch { throw new RequestValidationError("INVALID_CANONICAL_REQUEST"); } }
 
 function rejectVersion(value: unknown, key: string, supported: unknown, code: RequestValidationCode): void {
   if (typeof value === "object" && value !== null && Object.hasOwn(value, key) && (value as Record<string, unknown>)[key] !== supported) throw new RequestValidationError(code);

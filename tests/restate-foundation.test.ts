@@ -99,10 +99,11 @@ async function queryRestate(query: string): Promise<{ rows: Record<string, unkno
   return await response.json() as { rows: Record<string, unknown>[] };
 }
 
-async function expectUnsupportedVersion(
+async function expectDirectTerminal(
   label: string,
   mutate: (input: ReturnType<typeof buildCommitInput>) => unknown,
   expectedCode: string,
+  forbiddenValues: string[] = [],
 ): Promise<void> {
   const workflowId = id(label);
   const commandId = id(`${label}-command`);
@@ -131,6 +132,10 @@ async function expectUnsupportedVersion(
   expect.soft(invocations.rows[0]).toMatchObject({ status: "completed", completion_result: "failure" });
   expect.soft(failure).toContain(expectedCode);
   expect.soft(failure).not.toContain(commandId);
+  for (const forbidden of forbiddenValues) {
+    expect.soft(responseText).not.toContain(forbidden);
+    expect.soft(failure).not.toContain(forbidden);
+  }
   expect.soft(journal).not.toContain("canonical commit");
   expect.soft(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
   expect.soft(await readDomainState(admin)).toMatchObject({ version: "3", status: "open", payloadRef: null });
@@ -179,8 +184,49 @@ describe.sequential("Gate D Restate foundation vectors", () => {
     });
   }, 120_000);
 
+  it("GateD-V5 rejects invalid canonical request before workflow submission", async () => {
+    const sentinel = "CK_INVALID_CANONICAL_SENTINEL_20260711_";
+    const workflowId = id("v5-invalid-canonical");
+    const commandId = id("v5-invalid-canonical-command");
+    const request = structuredClone(completedRequest);
+    request.actionPayload.payloadRef = `${sentinel}${String.fromCharCode(0xd800)}`;
+    const worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+
+    let rejection: unknown;
+    try {
+      await submitRestateCommand(commandId, request, workflowId);
+    } catch (error) {
+      rejection = error;
+    }
+
+    const invocations = await queryRestate(
+      `select id from sys_invocation where target_service_name = 'ContinuityCommitT2bV1' and target_service_key = '${workflowId}'`,
+    );
+    const rejectionText = rejection instanceof Error ? `${rejection.name}:${rejection.message}` : String(rejection);
+    expect.soft(rejection).toBeInstanceOf(Error);
+    expect.soft(rejection).toMatchObject({ code: "INVALID_CANONICAL_REQUEST" });
+    for (const forbidden of [sentinel, commandId, "payloadRef"]) expect.soft(rejectionText).not.toContain(forbidden);
+    expect.soft(invocations.rows).toHaveLength(0);
+    expect.soft(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
+    expect.soft(await readDomainState(admin)).toMatchObject({ version: "3", status: "open", payloadRef: null });
+  }, 120_000);
+
+  it("GateD-V5 rejects invalid canonical request at direct ingress", async () => {
+    const sentinel = "CK_INVALID_CANONICAL_DIRECT_SENTINEL_20260711_";
+    await expectDirectTerminal(
+      "v5-invalid-canonical-direct",
+      (input) => ({ ...input, request: { ...input.request, actionPayload: {
+        ...input.request.actionPayload, payloadRef: `${sentinel}${String.fromCharCode(0xd800)}`,
+      } } }),
+      "INVALID_CANONICAL_REQUEST",
+      [sentinel, "payloadRef"],
+    );
+  }, 120_000);
+
   it("GateD-V5 fails explicitly for unsupported domain schema version at direct ingress", async () => {
-    await expectUnsupportedVersion(
+    await expectDirectTerminal(
       "v5-unsupported-domain",
       (input) => ({ ...input, domainSchemaVersion: 2 }),
       "UNSUPPORTED_DOMAIN_SCHEMA_VERSION",
@@ -188,7 +234,7 @@ describe.sequential("Gate D Restate foundation vectors", () => {
   }, 120_000);
 
   it("GateD-V5 fails explicitly for unsupported request-hash schema version at direct ingress", async () => {
-    await expectUnsupportedVersion(
+    await expectDirectTerminal(
       "v5-unsupported-request-hash",
       (input) => ({ ...input, request: { ...input.request, requestHashSchemaVersion: 2 } }),
       "UNSUPPORTED_REQUEST_HASH_SCHEMA_VERSION",
@@ -196,7 +242,7 @@ describe.sequential("Gate D Restate foundation vectors", () => {
   }, 120_000);
 
   it("GateD-V5 fails explicitly for unsupported authorization model version at direct ingress", async () => {
-    await expectUnsupportedVersion(
+    await expectDirectTerminal(
       "v5-unsupported-authorization",
       (input) => ({ ...input, authorizationModelVersion: 2 }),
       "UNSUPPORTED_AUTHORIZATION_MODEL_VERSION",
@@ -204,7 +250,7 @@ describe.sequential("Gate D Restate foundation vectors", () => {
   }, 120_000);
 
   it("GateD-V5 fails explicitly for unsupported validator version at direct ingress", async () => {
-    await expectUnsupportedVersion(
+    await expectDirectTerminal(
       "v5-unsupported-validator",
       (input) => ({ ...input, validatorVersion: 2 }),
       "UNSUPPORTED_VALIDATOR_VERSION",
@@ -212,7 +258,7 @@ describe.sequential("Gate D Restate foundation vectors", () => {
   }, 120_000);
 
   it("GateD-V5 fails explicitly for unsupported projection schema version at direct ingress", async () => {
-    await expectUnsupportedVersion(
+    await expectDirectTerminal(
       "v5-unsupported-projection",
       (input) => ({ ...input, projectionSchemaVersion: 2 }),
       "UNSUPPORTED_PROJECTION_SCHEMA_VERSION",
@@ -220,7 +266,7 @@ describe.sequential("Gate D Restate foundation vectors", () => {
   }, 120_000);
 
   it("GateD-V5 fails explicitly for unsupported serializer version at direct ingress", async () => {
-    await expectUnsupportedVersion(
+    await expectDirectTerminal(
       "v5-unsupported-serializer",
       (input) => ({ ...input, serializerVersion: "rfc8785-sha256-base64url-nopad-v2" }),
       "UNSUPPORTED_SERIALIZER_VERSION",
@@ -228,7 +274,7 @@ describe.sequential("Gate D Restate foundation vectors", () => {
   }, 120_000);
 
   it("GateD-V5 fails explicitly for unsupported runtime application version at direct ingress", async () => {
-    await expectUnsupportedVersion(
+    await expectDirectTerminal(
       "v5-unsupported-runtime",
       (input) => ({ ...input, runtimeApplicationVersion: "continuity-kernel-restate-gate-d-v2" }),
       "UNSUPPORTED_RUNTIME_APPLICATION_VERSION",

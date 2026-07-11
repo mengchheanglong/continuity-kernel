@@ -2,7 +2,7 @@ import * as restate from "@restatedev/restate-sdk";
 import postgres from "postgres";
 
 import { canonicalHash } from "../../domain/canonical.js";
-import { parseCommitInput, RequestValidationError } from "../../domain/request.js";
+import { canonicalRequestHash, parseCommitInput, RequestValidationError } from "../../domain/request.js";
 
 interface CommitResult {
   status: "accepted" | "rejected";
@@ -79,12 +79,11 @@ const workflow = restate.workflow({
   name: "ContinuityCommitT2bV1",
   handlers: {
     run: async (ctx: restate.WorkflowContext, input: unknown): Promise<CommitResult> => {
-      let validated: ReturnType<typeof parseCommitInput>;
-      try { validated = parseCommitInput(input); } catch (error) {
+      let validated: ReturnType<typeof parseCommitInput>, requestHash: string;
+      try { validated = parseCommitInput(input); requestHash = canonicalRequestHash(validated.request); } catch (error) {
         if (!(error instanceof RequestValidationError)) throw error;
         throw new restate.TerminalError(error.code, { errorCode: 400 });
       }
-      const requestHash = canonicalHash(validated.request);
       return ctx.run("canonical commit", async () => {
         const failpoint = process.env.CK_FAILPOINT;
         if (failpoint === "before_transaction" || failpoint === "before_recovery") {

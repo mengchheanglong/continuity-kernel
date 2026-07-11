@@ -1,7 +1,6 @@
 import { connect, type WorkflowDefinition } from "@restatedev/restate-sdk-clients";
 
-import { canonicalHash } from "../../domain/canonical.js";
-import { buildCommitInput, type CommitInput } from "../../domain/request.js";
+import { buildCommitInput, canonicalRequestHash, type CommitInput } from "../../domain/request.js";
 
 export interface CommitResult {
   status: "accepted" | "rejected";
@@ -26,7 +25,7 @@ export async function submitCommand(
   workflowId = commandId,
 ): Promise<CommitResult> {
   const input = buildCommitInput(commandId, request);
-  const requestHash = canonicalHash(input.request);
+  const requestHash = canonicalRequestHash(input.request);
   const submission = await ingress.workflowClient(workflow, workflowId)
     .workflowSubmit(input);
   const result = await ingress.result<CommitResult>(submission);
