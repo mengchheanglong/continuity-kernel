@@ -9,16 +9,17 @@ T0 DOCUMENTATION SCAFFOLD: COMPLETE — 66fe253
 T1 CONTRACT/VECTORS/MATRIX: FROZEN
 T2 DBOS COUNTEREXAMPLE: COMPLETE — DBOS_REJECTED_PENDING_ALTERNATIVE — 6ceb5b1
 T2B RESTATE: COMPLETE — RESTATE_PASSES_V4
+GATE D FOUNDATION: COMPLETE — GATE_D_PASSES_FOUNDATION_V3
 CUSTOM PERSISTENCE: PARKED
 ```
 
-The documentation baseline is commit `66fe2539f1ff1b93e38663e7b27c32804d2d0fc4`. T2 started clean at `2026-07-10T19:09:28Z` and ended with the evidence-backed DBOS decision in `artifacts/2026-07-11-t2-final.md`. T2b started from commit `5cfc4b1065b407c7138d73d261e47319e9ec996d` at `2026-07-11T02:43:48Z` and completed within the frozen bounds with `RESTATE_PASSES_V4`; see `artifacts/2026-07-11-t2b-final.md`.
+The documentation baseline is commit `66fe2539f1ff1b93e38663e7b27c32804d2d0fc4`. T2 ended with the evidence-backed DBOS decision in `artifacts/2026-07-11-t2-final.md`. T2b completed within its frozen bounds with `RESTATE_PASSES_V4`; see `artifacts/2026-07-11-t2b-final.md`. Gate D completed within the original eight-hour bound with `GATE_D_PASSES_FOUNDATION_V3`; see `artifacts/2026-07-11-gate-d-final.md`. T4 is not started automatically.
 
 ## Research question
 
-Can existing TypeScript durable infrastructure with PostgreSQL, plus a thin deterministic domain layer, satisfy the frozen continuity contract without framework-internal bypasses or custom persistence? T2 showed that DBOS 4.23.6 fails the named pre-commit V4 recovery guarantee. T2b asks whether pinned Restate satisfies that unchanged boundary within six implementation hours and 150 candidate-specific non-test TypeScript/SQL lines.
+Can existing TypeScript durable infrastructure with PostgreSQL, plus a thin deterministic domain layer, satisfy the frozen continuity contract without framework-internal bypasses or custom persistence? T2 showed that DBOS 4.23.6 fails the named pre-commit V4 recovery guarantee. T2b showed pinned Restate satisfies unchanged V4, and Gate D showed the Restate/PostgreSQL direction passes the complete frozen foundation suite within its bound.
 
-If Restate passes the unchanged V4 boundary, custom persistence remains parked and the surviving direction advances to the complete Gate-D suite. If Restate repeatedly fails the same guarantee for an intrinsic reason, a dated review must name the exact missing capability before any narrow custom feasibility spike can be considered.
+Restate passed the unchanged V4 boundary and the complete Gate-D suite, so custom persistence remains parked. Any future reversal requires a new dated, evidence-backed review; this decision does not begin T4.
 
 ## Architecture rule
 
@@ -65,7 +66,7 @@ See `docs/conformance-vectors.md` for exact fixtures and outcomes.
 
 ## Clock boundaries
 
-The T2 clock closed with decision commit `6ceb5b1`. T2b ran from `2026-07-11T02:43:48Z` to the decision at `2026-07-11T06:51:47Z`, within its six-hour deadline and 150-line candidate cap. Restate passed unchanged V4; Gate D must still port/run all six frozen vectors before any foundation promotion.
+The T2 clock closed with decision commit `6ceb5b1`. T2b ran from `2026-07-11T02:43:48Z` to `2026-07-11T06:51:47Z`, within its six-hour deadline and 150-line candidate cap. Gate D ran from `2026-07-11T07:12:49Z` to the final evidence pack at `2026-07-11T15:02:59Z`, within its original eight-hour deadline and 400-line cap.
 
 ## Explicit exclusions
 

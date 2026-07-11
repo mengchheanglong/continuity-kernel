@@ -7,7 +7,7 @@
 3. Read `docs/threat-and-privacy-boundary.md` and `docs/invariants.md`.
 4. Read `docs/conformance-vectors.md` and `docs/implementation-matrix.md`.
 5. Read `docs/architecture/preflight-decisions.md`.
-6. Read `artifacts/2026-07-11-t2-final.md` and `docs/architecture/t2b-preflight.md`.
+6. Read `artifacts/2026-07-11-gate-d-final.md` for the current foundation decision.
 7. For mission authority or research evidence, read the sibling files listed in `README.md`.
 
 ## Current phase
@@ -17,10 +17,11 @@ T0 DOCUMENTATION COMPLETE — 66fe253
 T1 CONTRACT/VECTORS/MATRIX FROZEN
 T2 COMPLETE — DBOS_REJECTED_PENDING_ALTERNATIVE — 6ceb5b1
 T2B COMPLETE — RESTATE_PASSES_V4
+GATE D COMPLETE — GATE_D_PASSES_FOUNDATION_V3
 CUSTOM PERSISTENCE PARKED
 ```
 
-The T2 decision is `artifacts/2026-07-11-t2-final.md`. The T2b preflight is `docs/architecture/t2b-preflight.md`; the completed evidence and decision are `artifacts/2026-07-11-t2b-final.md`. Restate/PostgreSQL advances to Gate D, where all six frozen vectors must run before foundation promotion. Do not alter frozen expected outcomes to make any incumbent pass.
+The current decision is `artifacts/2026-07-11-gate-d-final.md`. Restate/PostgreSQL passes the complete frozen Gate-D foundation suite. Custom persistence remains parked, T4 is not started automatically, and frozen expected outcomes remain immutable.
 
 ## Canonical rules
 
