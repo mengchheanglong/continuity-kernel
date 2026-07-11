@@ -800,6 +800,7 @@ describe.sequential("Gate D Restate foundation vectors", () => {
     }
     expect(attempts.length).toBeGreaterThan(1);
     expect(Math.max(...attempts.map((attempt) => attempt.count ?? 0))).toBeGreaterThan(5);
+    const cancellationRequestedAt = Date.now();
     await requestCancellation(invocationId);
     worker = spawnWorker();
     await waitMessage(worker, (message) => message.type === "ready");
@@ -813,6 +814,9 @@ describe.sequential("Gate D Restate foundation vectors", () => {
     );
     expect(attachedCancellation.status).toBe(409);
     expect(await attachedCancellation.json()).toEqual({ code: 409, message: "Cancelled" });
+    if (process.env.CK_GATE_D_EMIT_METRICS === "1") {
+      console.log(`GATE_D_CANCELLATION_CONFIRMATION_MS=${String(Date.now() - cancellationRequestedAt)}`);
+    }
     expect(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
     expect(await readDomainState(admin)).toEqual({
       version: "3", status: "open", commitmentDeadline: null, commitmentStatus: null, payloadRef: null,

@@ -14,6 +14,7 @@
     "test:db": "vitest run tests/database.test.ts --no-file-parallelism --bail=1",
     "test:dbos": "vitest run tests/dbos.test.ts tests/dbos-crash.test.ts --no-file-parallelism --bail=1",
     "test:gate-d": "vitest run tests/canonical.test.ts tests/database.test.ts tests/restate-foundation.test.ts tests/restate-crash.test.ts --no-file-parallelism --bail=1",
+    "measure:gate-d": "tsx scripts/gate-d-metrics.ts",
     "test": "vitest run --no-file-parallelism",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",

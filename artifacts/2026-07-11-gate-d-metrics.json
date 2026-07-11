@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-07-11T14:58:46.609Z",
+  "scope": "LOCAL_SYNTHETIC_MEASUREMENT_NOT_PRODUCTION_SLO",
+  "endpointSpawnToReady": {
+    "rawMs": [
+      717.67,
+      719.65,
+      733.97,
+      629.67,
+      710.63
+    ],
+    "minMs": 629.67,
+    "medianMs": 717.67,
+    "maxMs": 733.97
+  },
+  "canonicalCommitLatency": {
+    "rawMs": [
+      53.98,
+      10.47,
+      10.03,
+      9.21,
+      7.81
+    ],
+    "minMs": 7.81,
+    "medianMs": 10.03,
+    "maxMs": 53.98
+  },
+  "recoveryCompletion": {
+    "v4a": {
+      "rawMs": [
+        5874.97
+      ],
+      "minMs": 5874.97,
+      "medianMs": 5874.97,
+      "maxMs": 5874.97
+    },
+    "v4b": {
+      "rawMs": [
+        51767.19
+      ],
+      "minMs": 51767.19,
+      "medianMs": 51767.19,
+      "maxMs": 51767.19
+    },
+    "v4c": {
+      "rawMs": [
+        3904.44
+      ],
+      "minMs": 3904.44,
+      "medianMs": 3904.44,
+      "maxMs": 3904.44
+    }
+  },
+  "cancellationConfirmation": {
+    "rawMs": [
+      1121
+    ],
+    "minMs": 1121,
+    "medianMs": 1121,
+    "maxMs": 1121
+  },
+  "postCancellationObservation": {
+    "rawMs": [
+      5000
+    ],
+    "minMs": 5000,
+    "medianMs": 5000,
+    "maxMs": 5000
+  },
+  "replayThroughput": "NOT_APPLICABLE_NO_EVENT_REPLAY",
+  "limitations": [
+    "Local single-host synthetic measurements only",
+    "Recovery and cancellation samples include focused test harness overhead",
+    "Post-cancellation observation is the asserted five-second evidence window"
+  ]
+}
