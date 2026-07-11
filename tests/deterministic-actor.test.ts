@@ -4,7 +4,7 @@ vi.mock("../src/alternative/restate/client.js", () => ({
   submitCommand: vi.fn(),
 }));
 
-import { submitCommand } from "../src/alternative/restate/client.js";
+import { submitCommand, type CommitResult } from "../src/alternative/restate/client.js";
 import { canonicalRequestHash, type ResolveCaseRequest } from "../src/domain/request.js";
 
 const observation = {
@@ -127,6 +127,33 @@ describe("frozen T4 pure deterministic actor contract", () => {
     expect(proposal.commandId).toBe(`proposal:t4:v1:${expectedObservationHash}`);
     expect(canonicalRequestHash(proposal.request)).toBe(expectedRequestHash);
     expect(proposal.proposalDigest).toBe(expectedProposalDigest);
+
+    vi.mocked(submitCommand).mockClear();
+    const exactResult: CommitResult = {
+      status: "rejected",
+      code: "SYNTHETIC_REJECTION",
+      commandId: expectedCommandId,
+      requestHash: expectedRequestHash,
+    };
+    vi.mocked(submitCommand).mockResolvedValue(exactResult);
+    const executeObservation = await loadExecuteObservation();
+    const consequence = await executeObservation(observation, "workflow:test:actor-adapter-001");
+
+    expect(submitCommand).toHaveBeenCalledTimes(1);
+    expect(submitCommand).toHaveBeenCalledWith(
+      expectedCommandId,
+      expectedRequest,
+      "workflow:test:actor-adapter-001",
+    );
+    expect(consequence).toEqual({
+      consequenceSchemaVersion: 1,
+      proposalSchemaVersion: 1,
+      actorRuleVersion: 1,
+      commandId: expectedCommandId,
+      proposalDigest: expectedProposalDigest,
+      result: exactResult,
+    });
+    expect((consequence as { result: unknown }).result).toBe(exactResult);
   });
 
   it("repeats exactly after a real delay without changing canonical identity", async () => {
@@ -157,12 +184,24 @@ describe("frozen T4 pure deterministic actor contract", () => {
     );
   });
 
-  it("rejects an undeclared hidden field as a representation schema error", async () => {
-    expectDecisionCode(
-      await loadDeterministicActor(),
+  it("rejects malformed or undeclared representations as schema errors", async () => {
+    const actor = await loadDeterministicActor();
+    const { payloadRef: omittedPayloadRef, ...missingRequiredField } = observation;
+    void omittedPayloadRef;
+    const invalidRepresentations: ReadonlyArray<unknown> = [
       { ...observation, hiddenContext: "synthetic:undeclared" },
-      "INVALID_OBSERVATION_SCHEMA",
-    );
+      missingRequiredField,
+      { ...observation, worldTime: "2026-07-11 10:00:00" },
+      { ...observation, commitmentDeadline: "2026-07-11 12:00:00" },
+      { ...observation, authorizationVersion: "abc" },
+      { ...observation, authorizationVersion: "07" },
+      { ...observation, expectedCaseVersion: "-1" },
+      { ...observation, expectedCaseVersion: "03" },
+    ];
+
+    for (const input of invalidRepresentations) {
+      expectDecisionCode(actor, input, "INVALID_OBSERVATION_SCHEMA");
+    }
   });
 
   it("rejects declared actor and grant-actor mismatch as local consistency only", async () => {
@@ -220,6 +259,8 @@ describe("frozen T4 pure deterministic actor contract", () => {
     vi.mocked(submitCommand).mockClear();
     const actor = await loadDeterministicActor();
     const executeObservation = await loadExecuteObservation();
+    const { payloadRef: omittedPayloadRef, ...missingRequiredField } = observation;
+    void omittedPayloadRef;
     const rejections: ReadonlyArray<readonly [unknown, DecisionCode]> = [
       [
         { ...observation, observationSchemaVersion: 2, hiddenContext: "synthetic:undeclared" },
@@ -230,6 +271,16 @@ describe("frozen T4 pure deterministic actor contract", () => {
         "UNSUPPORTED_ACTOR_RULE_VERSION",
       ],
       [{ ...observation, hiddenContext: "synthetic:undeclared" }, "INVALID_OBSERVATION_SCHEMA"],
+      [missingRequiredField, "INVALID_OBSERVATION_SCHEMA"],
+      [{ ...observation, worldTime: "2026-07-11 10:00:00" }, "INVALID_OBSERVATION_SCHEMA"],
+      [
+        { ...observation, commitmentDeadline: "2026-07-11 12:00:00" },
+        "INVALID_OBSERVATION_SCHEMA",
+      ],
+      [{ ...observation, authorizationVersion: "abc" }, "INVALID_OBSERVATION_SCHEMA"],
+      [{ ...observation, authorizationVersion: "07" }, "INVALID_OBSERVATION_SCHEMA"],
+      [{ ...observation, expectedCaseVersion: "-1" }, "INVALID_OBSERVATION_SCHEMA"],
+      [{ ...observation, expectedCaseVersion: "03" }, "INVALID_OBSERVATION_SCHEMA"],
       [{ ...observation, grantActorId: "agent:test:other-001" }, "LOCAL_ACTOR_GRANT_MISMATCH"],
       [{ ...observation, caseStatus: "resolved" }, "CASE_NOT_OPEN"],
       [{ ...observation, permittedAction: "reassign_case" }, "ACTION_NOT_PERMITTED"],
