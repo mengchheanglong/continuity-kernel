@@ -194,4 +194,12 @@ describe.sequential("Gate D Restate foundation vectors", () => {
       "UNSUPPORTED_REQUEST_HASH_SCHEMA_VERSION",
     );
   }, 120_000);
+
+  it("GateD-V5 fails explicitly for unsupported authorization model version at direct ingress", async () => {
+    await expectUnsupportedVersion(
+      "v5-unsupported-authorization",
+      (input) => ({ ...input, authorizationModelVersion: 2 }),
+      "UNSUPPORTED_AUTHORIZATION_MODEL_VERSION",
+    );
+  }, 120_000);
 });
