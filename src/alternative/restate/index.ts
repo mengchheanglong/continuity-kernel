@@ -53,8 +53,9 @@ async function commit(commandId: string, requestHash: string, request: unknown, 
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
       return await app.begin("isolation level serializable", async (sql) => {
-        if (process.env.CK_FAILPOINT === "after_write") {
-          await sql`SELECT pg_catalog.set_config('continuity.test_failpoint', 'after_write', true)`;
+        const failpoint = process.env.CK_FAILPOINT;
+        if (failpoint === "after_write" || (failpoint === "snapshot_barrier" && attempt === 1)) {
+          await sql`SELECT pg_catalog.set_config('continuity.test_failpoint', ${failpoint}, true)`;
         }
         const rows = await sql<{ result: CommitResult }[]>`
           SELECT continuity.commit_command(

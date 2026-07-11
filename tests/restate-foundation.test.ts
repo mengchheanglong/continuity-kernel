@@ -7,18 +7,27 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { submitCommand as submitRestateCommand } from "../src/alternative/restate/client.js";
 import { buildCommitInput } from "../src/domain/request.js";
 import {
+  cancelledRequest,
+  completedProjectionDigest,
   completedRequest,
   createAdminSql,
   fixture,
   readDomainCounts,
   readDomainState,
   readGrant,
+  requestHashes,
   resetSyntheticFixture,
   revokeGrant,
 } from "./db-fixture.js";
 
 interface WorkerMessage { type: string; error?: string }
 interface Worker { child: ChildProcess; logs: string[]; messages: WorkerMessage[] }
+type SubmitterMessage =
+  | { type: "submitted"; invocationId: string }
+  | { type: "terminal"; status: string; code: string };
+interface Submitter { child: ChildProcess; messages: SubmitterMessage[]; invalidMessage: boolean }
+interface AdvisoryIdentity { database: string; classid: string; objid: string; objsubid: number }
+interface AdvisoryLock extends AdvisoryIdentity { pid: number; mode: string; granted: boolean }
 interface DecisionAudit {
   commandId: string; requestHash: string; actorId: string; authorizationGrantId: string;
   authorizationVersion: string; validatorVersion: number; decisionCode: string; payloadRef: string | null;
@@ -26,17 +35,21 @@ interface DecisionAudit {
 
 const admin = createAdminSql("continuity-kernel-gate-d-parent");
 const workers = new Set<Worker>();
+const submitters = new Set<Submitter>();
 const id = (label: string) => `gate-d:foundation:${label}:${randomUUID()}`;
 
 beforeEach(() => resetSyntheticFixture(admin), 30_000);
-afterEach(async () => { for (const worker of [...workers]) await kill(worker); }, 60_000);
+afterEach(async () => {
+  for (const submitter of [...submitters]) await killSubmitter(submitter);
+  for (const worker of [...workers]) await kill(worker);
+}, 60_000);
 afterAll(() => admin.end());
 
-function spawnWorker(): Worker {
+function spawnWorker(failpoint?: string): Worker {
   const child = fork(new URL("./restate-worker.ts", import.meta.url), [], {
     execPath: process.execPath,
     execArgv: ["--import", "tsx"],
-    env: { ...process.env },
+    env: { ...process.env, CK_FAILPOINT: failpoint },
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   const worker: Worker = { child, logs: [], messages: [] };
@@ -45,6 +58,60 @@ function spawnWorker(): Worker {
   child.on("message", (value: unknown) => worker.messages.push(value as WorkerMessage));
   workers.add(worker);
   return worker;
+}
+
+function isSubmitterMessage(value: unknown): value is SubmitterMessage {
+  if (typeof value !== "object" || value === null) return false;
+  const message = value as Record<string, unknown>;
+  const keys = Object.keys(message).sort();
+  return message.type === "submitted"
+    ? typeof message.invocationId === "string" && keys.join() === "invocationId,type"
+    : message.type === "terminal" && typeof message.status === "string" && typeof message.code === "string"
+      && keys.join() === "code,status,type";
+}
+
+function spawnSubmitter(commandId: string, workflowId: string): Submitter {
+  const child = fork(new URL("./restate-submitter.ts", import.meta.url), [commandId, workflowId], {
+    execPath: process.execPath,
+    execArgv: ["--import", "tsx"],
+    env: { ...process.env },
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+  const submitter: Submitter = { child, messages: [], invalidMessage: false };
+  child.on("message", (value: unknown) => {
+    if (isSubmitterMessage(value)) submitter.messages.push(value);
+    else submitter.invalidMessage = true;
+  });
+  submitters.add(submitter);
+  return submitter;
+}
+
+async function waitSubmitterMessage<T extends SubmitterMessage["type"]>(
+  submitter: Submitter,
+  type: T,
+): Promise<Extract<SubmitterMessage, { type: T }>> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (submitter.invalidMessage) throw new Error("Submitter sent an invalid IPC message");
+    const index = submitter.messages.findIndex((message) => message.type === type);
+    if (index >= 0) {
+      const message = submitter.messages.splice(index, 1)[0] as Extract<SubmitterMessage, { type: T }>;
+      expect(Object.keys(message).sort()).toEqual(type === "submitted"
+        ? ["invocationId", "type"] : ["code", "status", "type"]);
+      return message;
+    }
+    if (submitter.child.exitCode !== null) throw new Error(`Submitter exited ${String(submitter.child.exitCode)}`);
+    await delay(10);
+  }
+  throw new Error(`Submitter ${type} message timeout`);
+}
+
+async function killSubmitter(submitter: Submitter): Promise<void> {
+  submitters.delete(submitter);
+  if (submitter.child.exitCode !== null) return;
+  const exited = new Promise<void>((resolve) => submitter.child.once("exit", () => { resolve(); }));
+  submitter.child.kill("SIGKILL");
+  await exited;
 }
 
 async function waitMessage(worker: Worker, match: (message: WorkerMessage) => boolean): Promise<WorkerMessage> {
@@ -104,6 +171,150 @@ async function queryRestate(query: string): Promise<{ rows: Record<string, unkno
   });
   if (!response.ok) throw new Error(`Restate query failed (${String(response.status)}): ${await response.text()}`);
   return await response.json() as { rows: Record<string, unknown>[] };
+}
+
+async function acquireSnapshotBarrier(): Promise<{
+  pid: number; identity: AdvisoryIdentity; release: () => Promise<void>;
+}> {
+  const holder = createAdminSql("continuity-gate-d-snapshot-barrier-parent");
+  const connection = await holder.reserve();
+  let released = false;
+  const release = async () => {
+    if (released) return;
+    released = true;
+    try {
+      const rows = await connection<{ unlocked: boolean }[]>`
+        SELECT pg_catalog.pg_advisory_unlock(
+          pg_catalog.hashtextextended('continuity-gate-d-snapshot-barrier', 0)
+        ) AS unlocked
+      `;
+      if (rows[0]?.unlocked !== true) throw new Error("Snapshot barrier parent lock was not held");
+    } finally {
+      connection.release();
+      await holder.end({ timeout: 5 });
+    }
+  };
+  try {
+    const pidRows = await connection<{ pid: number }[]>`
+      SELECT pg_catalog.pg_backend_pid() AS pid,
+        pg_catalog.pg_advisory_lock(
+          pg_catalog.hashtextextended('continuity-gate-d-snapshot-barrier', 0)
+        )
+    `;
+    const pid = pidRows[0]?.pid;
+    if (pid === undefined) throw new Error("Snapshot barrier parent PID missing");
+    const locks = await admin<AdvisoryLock[]>`
+      SELECT database::text AS database, classid::text AS classid, objid::text AS objid,
+        objsubid, pid, mode, granted
+      FROM pg_catalog.pg_locks
+      WHERE locktype = 'advisory' AND pid = ${pid}
+    `;
+    expect(locks).toHaveLength(1);
+    expect(locks[0]).toMatchObject({ pid, mode: "ExclusiveLock", granted: true });
+    const lock = locks[0];
+    if (lock === undefined) throw new Error("Snapshot barrier parent lock missing");
+    return {
+      pid,
+      identity: { database: lock.database, classid: lock.classid, objid: lock.objid, objsubid: lock.objsubid },
+      release,
+    };
+  } catch (error) {
+    await release();
+    throw error;
+  }
+}
+
+async function waitForSnapshotWaiters(identity: AdvisoryIdentity, expected: number): Promise<AdvisoryLock[]> {
+  const deadline = Date.now() + 30_000;
+  let observed: AdvisoryLock[] = [];
+  while (Date.now() < deadline) {
+    observed = await admin<AdvisoryLock[]>`
+      SELECT l.database::text AS database, l.classid::text AS classid, l.objid::text AS objid,
+        l.objsubid, l.pid, l.mode, l.granted
+      FROM pg_catalog.pg_locks AS l
+      JOIN pg_catalog.pg_stat_activity AS a ON a.pid = l.pid
+      WHERE l.locktype = 'advisory'
+        AND l.database::text = ${identity.database}
+        AND l.classid::text = ${identity.classid}
+        AND l.objid::text = ${identity.objid}
+        AND l.objsubid = ${identity.objsubid}
+        AND a.application_name = 'continuity-kernel-restate'
+    `;
+    if (observed.length === expected
+      && new Set(observed.map((row) => row.pid)).size === expected
+      && observed.every((row) => row.mode === "ShareLock" && !row.granted)) {
+      for (const row of observed) expect(row).toMatchObject({ ...identity, mode: "ShareLock", granted: false });
+      return observed;
+    }
+    await delay(25);
+  }
+  throw new Error(`Expected ${String(expected)} exact snapshot barrier waiters; observed ${JSON.stringify(observed)}`);
+}
+
+async function submitWorkflow(workflowId: string, commandId: string, request: unknown): Promise<string> {
+  const response = await fetch(
+    `http://127.0.0.1:8080/restate/send/ContinuityCommitT2bV1/${encodeURIComponent(workflowId)}/run`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(buildCommitInput(commandId, request)),
+    },
+  );
+  if (!response.ok) throw new Error(`Workflow submission failed (${String(response.status)}): ${await response.text()}`);
+  const body = await response.json() as { invocationId?: string };
+  if (body.invocationId === undefined) throw new Error("Workflow submission returned no invocation ID");
+  return body.invocationId;
+}
+
+async function attachWorkflow(invocationId: string): Promise<Record<string, unknown>> {
+  const response = await fetch(`http://127.0.0.1:8080/restate/attach/${encodeURIComponent(invocationId)}`, {
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`Workflow attach failed (${String(response.status)}): ${await response.text()}`);
+  return await response.json() as Record<string, unknown>;
+}
+
+async function readStoredReceipt(namespaceId: string, commandId: string): Promise<Record<string, unknown>> {
+  const rows = await admin<{ result: Record<string, unknown> }[]>`
+    SELECT result FROM continuity.command_receipts
+    WHERE namespace_id = ${namespaceId} AND command_id = ${commandId}
+  `;
+  if (rows.length !== 1 || rows[0] === undefined) throw new Error("Expected exactly one stored receipt");
+  return rows[0].result;
+}
+
+async function expectInvocationResults(
+  invocationIds: string[], namespaceId: string, commandId: string,
+): Promise<Record<string, unknown>> {
+  const expected = {
+    ...await readStoredReceipt(namespaceId, commandId),
+    projectionDigest: completedProjectionDigest,
+  };
+  for (const invocationId of invocationIds) expect(await attachWorkflow(invocationId)).toEqual(expected);
+  return expected;
+}
+
+const restateString = (value: string) => `'${value.replaceAll("'", "''")}'`;
+
+async function purgeInvocation(invocationId: string): Promise<void> {
+  const literal = restateString(invocationId);
+  const beforeInvocation = await queryRestate(`select id, status from sys_invocation where id = ${literal}`);
+  const beforeJournal = await queryRestate(`select id from sys_journal where id = ${literal}`);
+  expect(beforeInvocation.rows).toEqual([expect.objectContaining({ id: invocationId, status: "completed" })]);
+  expect(beforeJournal.rows.length).toBeGreaterThan(0);
+  const response = await fetch(
+    `http://127.0.0.1:9070/invocations/${encodeURIComponent(invocationId)}/purge`,
+    { method: "PATCH" },
+  );
+  if (response.status !== 200) throw new Error(`Invocation purge failed (${String(response.status)}): ${await response.text()}`);
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const invocation = await queryRestate(`select id from sys_invocation where id = ${literal}`);
+    const journal = await queryRestate(`select id from sys_journal where id = ${literal}`);
+    if (invocation.rows.length === 0 && journal.rows.length === 0) return;
+    await delay(25);
+  }
+  throw new Error("Purged invocation remained in supported Restate introspection");
 }
 
 async function readDecisionAudits(): Promise<DecisionAudit[]> {
@@ -200,6 +411,207 @@ describe.sequential("Gate D Restate foundation vectors", () => {
       authorizationGrantId: fixture.authorizationGrantId, authorizationVersion: fixture.authorizationVersion,
       validatorVersion: 1, decisionCode: result.code, payloadRef: fixture.payloadRef,
     }]);
+  }, 120_000);
+
+  it("GateD-V2A returns one stored receipt for two independent same-hash submitters using the same workflow key", async () => {
+    const commandId = id("v2a-same-key-command");
+    const workflowId = id("v2a-same-key-workflow");
+    const barrier = await acquireSnapshotBarrier();
+    let first!: Submitter;
+    let second!: Submitter;
+    let firstInvocationId!: string;
+    let secondInvocationId!: string;
+    try {
+      const worker = spawnWorker("snapshot_barrier");
+      await waitMessage(worker, (message) => message.type === "ready");
+      await registerDeployment();
+      first = spawnSubmitter(commandId, workflowId);
+      firstInvocationId = (await waitSubmitterMessage(first, "submitted")).invocationId;
+      const initialWaiters = await waitForSnapshotWaiters(barrier.identity, 1);
+
+      second = spawnSubmitter(commandId, workflowId);
+      secondInvocationId = (await waitSubmitterMessage(second, "submitted")).invocationId;
+      expect(first.child.pid).toBeDefined();
+      expect(second.child.pid).toBeDefined();
+      expect(first.child.pid).not.toBe(second.child.pid);
+      await delay(50);
+      expect(first.messages.some((message) => message.type === "terminal")).toBe(false);
+      expect(second.messages.some((message) => message.type === "terminal")).toBe(false);
+      expect(first.child.exitCode).toBeNull();
+      expect(second.child.exitCode).toBeNull();
+      const coalescedWaiters = await waitForSnapshotWaiters(barrier.identity, 1);
+      expect(coalescedWaiters[0]?.pid).toBe(initialWaiters[0]?.pid);
+      expect((await queryRestate(
+        `select id from sys_invocation where target_service_name='ContinuityCommitT2bV1' and target_service_key=${restateString(workflowId)}`,
+      )).rows).toHaveLength(1);
+      expect(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
+      expect(await readDomainState(admin)).toMatchObject({ version: "3", status: "open" });
+    } finally {
+      await barrier.release();
+    }
+
+    const terminals = await Promise.all([
+      waitSubmitterMessage(first, "terminal"),
+      waitSubmitterMessage(second, "terminal"),
+    ]);
+    expect(terminals).toEqual([
+      { type: "terminal", status: "accepted", code: "ACCEPTED" },
+      { type: "terminal", status: "accepted", code: "ACCEPTED" },
+    ]);
+    expect(first).toMatchObject({ messages: [], invalidMessage: false });
+    expect(second).toMatchObject({ messages: [], invalidMessage: false });
+    await expectInvocationResults([firstInvocationId, secondInvocationId], fixture.namespaceId, commandId);
+    expect(await readDomainCounts(admin)).toEqual({ receipts: 1, acceptedHistory: 1 });
+    expect(await readDomainState(admin)).toMatchObject({ version: "4", status: "resolved" });
+  }, 120_000);
+
+  it("GateD-V2A returns one stored receipt for two independent same-hash submitters using distinct workflow keys", async () => {
+    const commandId = id("v2a-distinct-key-command");
+    const barrier = await acquireSnapshotBarrier();
+    let first!: Submitter;
+    let second!: Submitter;
+    let invocationIds!: string[];
+    try {
+      const worker = spawnWorker("snapshot_barrier");
+      await waitMessage(worker, (message) => message.type === "ready");
+      await registerDeployment();
+      first = spawnSubmitter(commandId, id("v2a-distinct-key-workflow-a"));
+      second = spawnSubmitter(commandId, id("v2a-distinct-key-workflow-b"));
+      expect(first.child.pid).toBeDefined();
+      expect(second.child.pid).toBeDefined();
+      expect(first.child.pid).not.toBe(second.child.pid);
+      const submissions = await Promise.all([
+        waitSubmitterMessage(first, "submitted"),
+        waitSubmitterMessage(second, "submitted"),
+      ]);
+      invocationIds = submissions.map((message) => message.invocationId);
+      expect(new Set(invocationIds).size).toBe(2);
+      const waiters = await waitForSnapshotWaiters(barrier.identity, 2);
+      expect(new Set(waiters.map((waiter) => waiter.pid)).size).toBe(2);
+      expect(first.messages.some((message) => message.type === "terminal")).toBe(false);
+      expect(second.messages.some((message) => message.type === "terminal")).toBe(false);
+      expect(first.child.exitCode).toBeNull();
+      expect(second.child.exitCode).toBeNull();
+      expect(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
+      expect(await readDomainState(admin)).toMatchObject({ version: "3", status: "open" });
+    } finally {
+      await barrier.release();
+    }
+
+    const terminals = await Promise.all([
+      waitSubmitterMessage(first, "terminal"),
+      waitSubmitterMessage(second, "terminal"),
+    ]);
+    for (const terminal of terminals) expect(terminal).toEqual({ type: "terminal", status: "accepted", code: "ACCEPTED" });
+    expect(first).toMatchObject({ messages: [], invalidMessage: false });
+    expect(second).toMatchObject({ messages: [], invalidMessage: false });
+    await expectInvocationResults(invocationIds, fixture.namespaceId, commandId);
+    expect(await readDomainCounts(admin)).toEqual({ receipts: 1, acceptedHistory: 1 });
+    expect(await readDomainState(admin)).toMatchObject({ version: "4", status: "resolved" });
+  }, 120_000);
+
+  it("GateD-V2B rejects different hash across same and new workflow keys", async () => {
+    const commandId = id("v2b-different-hash-command");
+    const workflowId = id("v2b-different-hash-workflow");
+    const worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+
+    const accepted = await submitRestateCommand(commandId, completedRequest, workflowId);
+    const sameKey = await submitRestateCommand(commandId, cancelledRequest, workflowId);
+    const newKey = await submitRestateCommand(commandId, cancelledRequest, id("v2b-different-hash-new-workflow"));
+
+    expect(accepted).toEqual({
+      ...await readStoredReceipt(fixture.namespaceId, commandId),
+      projectionDigest: completedProjectionDigest,
+    });
+    expect(sameKey).toEqual({
+      status: "rejected", code: "IDEMPOTENCY_KEY_REUSED", commandId, requestHash: requestHashes.cancelled,
+    });
+    expect(newKey).toMatchObject({
+      status: "rejected", code: "IDEMPOTENCY_KEY_REUSED", namespaceId: fixture.namespaceId,
+      caseId: fixture.caseId, commandId, requestHash: requestHashes.cancelled,
+    });
+    expect(await readDecisionAudits()).toEqual([expect.objectContaining({
+      commandId, requestHash: requestHashes.cancelled, decisionCode: "IDEMPOTENCY_KEY_REUSED",
+    })]);
+    expect(await readDomainCounts(admin)).toEqual({ receipts: 1, acceptedHistory: 1 });
+    expect(await readDomainState(admin)).toMatchObject({ version: "4", status: "resolved", commitmentStatus: "completed" });
+  }, 120_000);
+
+  it("GateD-V2B preserves receipt authority after endpoint restart and supported invocation purge", async () => {
+    const commandId = id("v2b-purge-command");
+    let worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+    const invocationId = await submitWorkflow(id("v2b-purge-initial-workflow"), commandId, completedRequest);
+    const initial = await attachWorkflow(invocationId);
+    expect(initial).toEqual({
+      ...await readStoredReceipt(fixture.namespaceId, commandId),
+      projectionDigest: completedProjectionDigest,
+    });
+
+    await purgeInvocation(invocationId);
+    await kill(worker);
+    worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+
+    const replay = await submitRestateCommand(commandId, completedRequest, id("v2b-purge-replay-workflow"));
+    const mismatch = await submitRestateCommand(commandId, cancelledRequest, id("v2b-purge-mismatch-workflow"));
+    expect(replay).toEqual(initial);
+    expect(mismatch).toMatchObject({
+      status: "rejected", code: "IDEMPOTENCY_KEY_REUSED", namespaceId: fixture.namespaceId,
+      caseId: fixture.caseId, commandId, requestHash: requestHashes.cancelled,
+    });
+    expect(await readDecisionAudits()).toEqual([expect.objectContaining({
+      commandId, requestHash: requestHashes.cancelled, decisionCode: "IDEMPOTENCY_KEY_REUSED",
+    })]);
+    expect(await readDomainCounts(admin)).toEqual({ receipts: 1, acceptedHistory: 1 });
+    expect(await readDomainState(admin)).toMatchObject({ version: "4", status: "resolved", commitmentStatus: "completed" });
+  }, 120_000);
+
+  it("GateD supporting assertion keeps command IDs independent across namespaces", async () => {
+    const secondNamespace = `ns:test:continuity-kernel-v0:${randomUUID()}`;
+    const commandId = id("cross-namespace-command");
+    await admin`
+      INSERT INTO continuity.authorization_grants (
+        namespace_id, authorization_grant_id, case_id, actor_id, version, is_revoked
+      ) VALUES (
+        ${secondNamespace}, ${fixture.authorizationGrantId}, ${fixture.caseId},
+        ${fixture.ownerAgentId}, ${fixture.authorizationVersion}, false
+      )
+    `;
+    await admin`
+      INSERT INTO continuity.cases (namespace_id, case_id, owner_agent_id, version, status)
+      VALUES (${secondNamespace}, ${fixture.caseId}, ${fixture.ownerAgentId}, ${fixture.caseVersion}, 'open')
+    `;
+    const worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+
+    const secondRequest = { ...structuredClone(completedRequest), namespaceId: secondNamespace };
+    const results = await Promise.all([
+      submitRestateCommand(commandId, completedRequest, id("cross-namespace-primary-workflow")),
+      submitRestateCommand(commandId, secondRequest, id("cross-namespace-secondary-workflow")),
+    ]);
+    expect(results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: "accepted", code: "ACCEPTED", namespaceId: fixture.namespaceId, commandId }),
+      expect.objectContaining({ status: "accepted", code: "ACCEPTED", namespaceId: secondNamespace, commandId }),
+    ]));
+    const rows = await admin<{ namespaceId: string; version: string; receipts: number; acceptedHistory: number }[]>`
+      SELECT c.namespace_id AS "namespaceId", c.version::text AS version,
+        (SELECT count(*)::integer FROM continuity.command_receipts AS r
+          WHERE r.namespace_id = c.namespace_id AND r.command_id = ${commandId}) AS receipts,
+        (SELECT count(*)::integer FROM continuity.accepted_history AS h
+          WHERE h.namespace_id = c.namespace_id AND h.command_id = ${commandId}) AS "acceptedHistory"
+      FROM continuity.cases AS c
+      WHERE c.namespace_id IN (${fixture.namespaceId}, ${secondNamespace}) AND c.case_id = ${fixture.caseId}
+      ORDER BY c.namespace_id
+    `;
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row).toMatchObject({ version: "4", receipts: 1, acceptedHistory: 1 });
+    expect(rows.map((row) => row.namespaceId).sort()).toEqual([fixture.namespaceId, secondNamespace].sort());
   }, 120_000);
 
   it("GateD-V5 rejects undeclared optional payload bytes before workflow submission", async () => {

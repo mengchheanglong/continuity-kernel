@@ -49,6 +49,11 @@ DECLARE
   v_receipt continuity.command_receipts%ROWTYPE; v_grant continuity.authorization_grants%ROWTYPE;
   v_case continuity.cases%ROWTYPE; v_code text; v_result jsonb; v_projection jsonb; v_new_version bigint;
 BEGIN
+  IF pg_catalog.current_setting('continuity.test_failpoint', true) = 'snapshot_barrier' THEN
+    SELECT version INTO v_new_version FROM continuity.cases WHERE namespace_id=v_namespace AND case_id=v_case_id;
+    IF NOT FOUND OR v_new_version::text IS DISTINCT FROM v_expected_version THEN RAISE EXCEPTION 'SNAPSHOT_BARRIER_VERSION_MISMATCH'; END IF;
+    PERFORM pg_catalog.pg_advisory_xact_lock_shared(pg_catalog.hashtextextended('continuity-gate-d-snapshot-barrier', 0));
+  END IF;
   IF pg_catalog.current_setting('continuity.test_failpoint', true) = 'retry_forever' THEN RAISE EXCEPTION USING ERRCODE='40001'; END IF;
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(pg_catalog.length(v_namespace)::text || ':' || v_namespace || p_command_id, 0));
   SELECT * INTO v_receipt FROM continuity.command_receipts
