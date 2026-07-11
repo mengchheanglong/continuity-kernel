@@ -202,4 +202,12 @@ describe.sequential("Gate D Restate foundation vectors", () => {
       "UNSUPPORTED_AUTHORIZATION_MODEL_VERSION",
     );
   }, 120_000);
+
+  it("GateD-V5 fails explicitly for unsupported validator version at direct ingress", async () => {
+    await expectUnsupportedVersion(
+      "v5-unsupported-validator",
+      (input) => ({ ...input, validatorVersion: 2 }),
+      "UNSUPPORTED_VALIDATOR_VERSION",
+    );
+  }, 120_000);
 });
