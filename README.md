@@ -7,17 +7,18 @@ A research-grade conformance harness for testing continuity properties across st
 ```text
 T0 DOCUMENTATION SCAFFOLD: COMPLETE — 66fe253
 T1 CONTRACT/VECTORS/MATRIX: FROZEN
-T2 12-HOUR IMPLEMENTATION CLOCK: RUNNING — DEADLINE 2026-07-11T07:09:28Z
+T2 DBOS COUNTEREXAMPLE: COMPLETE — DBOS_REJECTED_PENDING_ALTERNATIVE — 6ceb5b1
+T2B RESTATE PREFLIGHT: FROZEN — IMPLEMENTATION CLOCK NOT STARTED
 CUSTOM PERSISTENCE: NOT AUTHORIZED
 ```
 
-The documentation baseline is commit `66fe2539f1ff1b93e38663e7b27c32804d2d0fc4`. T2 started from clean status at `2026-07-10T19:09:28Z`; implementation evidence begins at `artifacts/2026-07-10-t2-start.md`.
+The documentation baseline is commit `66fe2539f1ff1b93e38663e7b27c32804d2d0fc4`. T2 started clean at `2026-07-10T19:09:28Z` and ended with the evidence-backed decision in `artifacts/2026-07-11-t2-final.md`. T2b selects Restate as the bounded maintained alternative in `docs/architecture/t2b-preflight.md`; no alternative package, configuration, source, executable test, image pull/start, or deployment registration has begun.
 
 ## Research question
 
-Can DBOS TypeScript with PostgreSQL, plus a thin deterministic domain layer, satisfy six frozen continuity vectors within 12 implementation hours and at most 300 counted hand-written non-test TypeScript/SQL lines—without modifying or bypassing DBOS internals or introducing a generic custom event store/projector?
+Can existing TypeScript durable infrastructure with PostgreSQL, plus a thin deterministic domain layer, satisfy the frozen continuity contract without framework-internal bypasses or custom persistence? T2 showed that DBOS 4.23.6 fails the named pre-commit V4 recovery guarantee. T2b asks whether pinned Restate satisfies that unchanged boundary within six implementation hours and 150 candidate-specific non-test TypeScript/SQL lines.
 
-If yes, bespoke-kernel-first is falsified and parked. If DBOS repeatedly fails one unchanged mission-defining vector for an intrinsic reason, the failure must survive the appropriate bounded existing alternative before any exact custom capability can be considered.
+If Restate passes the unchanged V4 boundary, custom persistence remains parked and the surviving direction advances to the complete Gate-D suite. If Restate repeatedly fails the same guarantee for an intrinsic reason, a dated review must name the exact missing capability before any narrow custom feasibility spike can be considered.
 
 ## Architecture rule
 
@@ -37,6 +38,8 @@ Existing durable infrastructure must be tested before custom persistence is just
 6. `docs/conformance-vectors.md`
 7. `docs/implementation-matrix.md`
 8. `docs/architecture/preflight-decisions.md`
+9. `artifacts/2026-07-11-t2-final.md`
+10. `docs/architecture/t2b-preflight.md`
 
 Mission authority and research evidence live in the sibling repository:
 
@@ -59,9 +62,9 @@ When this repository and Mission Control differ, stop and reconcile the conflict
 
 See `docs/conformance-vectors.md` for exact fixtures and outcomes.
 
-## T2 clock boundary
+## Clock boundaries
 
-The 12-hour clock started at `2026-07-10T19:09:28Z` and stops no later than `2026-07-11T07:09:28Z`. All package, dependency, PostgreSQL/DBOS setup, migration, script, source, test, debugging, and rerun time now counts. Expected vector outcomes remain frozen.
+The T2 clock closed with decision commit `6ceb5b1`. The six-hour T2b clock is not started. It begins immediately before the first alternative package/lockfile change, Restate configuration, executable source/test, image pull/start, deployment registration, or candidate probe. A dated start artifact and clean baseline commit must precede that action. Expected vector outcomes remain frozen.
 
 ## Explicit exclusions
 

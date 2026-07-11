@@ -7,17 +7,20 @@
 3. Read `docs/threat-and-privacy-boundary.md` and `docs/invariants.md`.
 4. Read `docs/conformance-vectors.md` and `docs/implementation-matrix.md`.
 5. Read `docs/architecture/preflight-decisions.md`.
-6. For mission authority or research evidence, read the sibling files listed in `README.md`.
+6. Read `artifacts/2026-07-11-t2-final.md` and `docs/architecture/t2b-preflight.md`.
+7. For mission authority or research evidence, read the sibling files listed in `README.md`.
 
 ## Current phase
 
 ```text
 T0 DOCUMENTATION COMPLETE — 66fe253
 T1 CONTRACT/VECTORS/MATRIX FROZEN
-T2 CLOCK RUNNING — HARD DEADLINE 2026-07-11T07:09:28Z
+T2 COMPLETE — DBOS_REJECTED_PENDING_ALTERNATIVE — 6ceb5b1
+T2B RESTATE PREFLIGHT FROZEN — IMPLEMENTATION CLOCK NOT STARTED
+CUSTOM PERSISTENCE NOT AUTHORIZED
 ```
 
-The dated start artifact is `artifacts/2026-07-10-t2-start.md`. All implementation/setup time now counts. Stop at the hard deadline and record incomplete work honestly. Do not alter frozen expected outcomes to make the incumbent pass.
+The T2 decision is `artifacts/2026-07-11-t2-final.md`. The T2b authority is `docs/architecture/t2b-preflight.md`. Do not install, configure, pull/start, register, test, or implement Restate until a dated T2b start artifact is committed immediately before the first such action. Do not alter frozen expected outcomes to make any incumbent pass.
 
 ## Canonical rules
 
