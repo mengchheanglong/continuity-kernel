@@ -2,8 +2,8 @@ import * as restate from "@restatedev/restate-sdk";
 import postgres from "postgres";
 
 import { canonicalHash } from "../../domain/canonical.js";
+import { commitInputSchema } from "../../domain/request.js";
 
-interface CommitInput { commandId: string; request: unknown }
 interface CommitResult {
   status: "accepted" | "rejected";
   code: string;
@@ -49,7 +49,7 @@ function postgresCode(error: unknown): string | undefined {
     : undefined;
 }
 
-async function commit(commandId: string, requestHash: string, request: unknown): Promise<CommitResult> {
+async function commit(commandId: string, requestHash: string, request: unknown, validatorVersion: number, projectionSchemaVersion: number): Promise<CommitResult> {
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
       return await app.begin("isolation level serializable", async (sql) => {
@@ -58,7 +58,7 @@ async function commit(commandId: string, requestHash: string, request: unknown):
         }
         const rows = await sql<{ result: CommitResult }[]>`
           SELECT continuity.commit_command(
-            ${commandId}, ${requestHash}, ${sql.json(request as never)}, 1, 1
+            ${commandId}, ${requestHash}, ${sql.json(request as never)}, ${validatorVersion}, ${projectionSchemaVersion}
           ) AS result
         `;
         const result = rows[0]?.result;
@@ -78,15 +78,19 @@ async function commit(commandId: string, requestHash: string, request: unknown):
 const workflow = restate.workflow({
   name: "ContinuityCommitT2bV1",
   handlers: {
-    run: async (ctx: restate.WorkflowContext, input: CommitInput): Promise<CommitResult> => {
-      const requestHash = canonicalHash(input.request);
+    run: async (ctx: restate.WorkflowContext, input: unknown): Promise<CommitResult> => {
+      const parsed = commitInputSchema.safeParse(input);
+      if (!parsed.success) throw new restate.TerminalError("INVALID_REQUEST_SCHEMA", { errorCode: 400 });
+      const validated = parsed.data;
+      const requestHash = canonicalHash(validated.request);
       return ctx.run("canonical commit", async () => {
         const failpoint = process.env.CK_FAILPOINT;
         if (failpoint === "before_transaction" || failpoint === "before_recovery") {
           signal(failpoint);
           await waitForContinue();
         }
-        const result = await commit(input.commandId, requestHash, input.request);
+        const result = await commit(validated.commandId, requestHash, validated.request,
+          validated.validatorVersion, validated.projectionSchemaVersion);
         if (failpoint === "after_commit") {
           signal("after_commit");
           await block();

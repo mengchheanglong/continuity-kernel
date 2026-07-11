@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { submitCommand as submitRestateCommand } from "../src/alternative/restate/client.js";
+import { buildCommitInput } from "../src/domain/request.js";
 import {
   cancelledRequest,
   completedProjectionDigest,
@@ -93,7 +94,7 @@ async function submitWorkflow(workflowId: string, commandId: string): Promise<st
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ commandId, request: completedRequest }),
+      body: JSON.stringify(buildCommitInput(commandId, completedRequest)),
     },
   );
   if (!response.ok) throw new Error(`Workflow submission failed (${String(response.status)}): ${await response.text()}`);

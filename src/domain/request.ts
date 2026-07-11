@@ -1,0 +1,52 @@
+import { z } from "zod";
+
+const nonemptyString = z.string().min(1);
+const decimalString = z.string().regex(/^(0|[1-9]\d*)$/u);
+
+export const resolveCaseRequestSchema = z.strictObject({
+  requestHashSchemaVersion: z.literal(1),
+  namespaceId: nonemptyString,
+  caseId: nonemptyString,
+  actorId: nonemptyString,
+  authorizationGrantId: nonemptyString,
+  authorizationVersion: decimalString,
+  expectedCaseVersion: decimalString,
+  actionType: z.literal("resolve_case"),
+  actionPayload: z.strictObject({
+    commitmentDeadline: z.iso.datetime(),
+    payloadRef: nonemptyString,
+    resolution: z.enum(["completed", "cancelled"]),
+  }),
+  worldTime: z.iso.datetime(),
+});
+
+export type ResolveCaseRequest = z.infer<typeof resolveCaseRequestSchema>;
+
+export const commitInputSchema = z.strictObject({
+  commandId: nonemptyString,
+  domainSchemaVersion: z.literal(1),
+  authorizationModelVersion: z.literal(1),
+  validatorVersion: z.literal(1),
+  projectionSchemaVersion: z.literal(1),
+  serializerVersion: z.literal("rfc8785-sha256-base64url-nopad-v1"),
+  runtimeApplicationVersion: z.literal("continuity-kernel-restate-gate-d-v1"),
+  request: resolveCaseRequestSchema,
+});
+
+export type CommitInput = z.infer<typeof commitInputSchema>;
+
+export class RequestValidationError extends Error {
+  readonly code = "INVALID_REQUEST_SCHEMA";
+  constructor() { super("INVALID_REQUEST_SCHEMA"); this.name = "RequestValidationError"; }
+}
+
+export function buildCommitInput(commandId: unknown, request: unknown): CommitInput {
+  const parsed = commitInputSchema.safeParse({
+    commandId, request, domainSchemaVersion: 1, authorizationModelVersion: 1,
+    validatorVersion: 1, projectionSchemaVersion: 1,
+    serializerVersion: "rfc8785-sha256-base64url-nopad-v1",
+    runtimeApplicationVersion: "continuity-kernel-restate-gate-d-v1",
+  });
+  if (!parsed.success) throw new RequestValidationError();
+  return parsed.data;
+}
