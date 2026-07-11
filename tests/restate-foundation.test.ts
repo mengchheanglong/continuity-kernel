@@ -210,4 +210,12 @@ describe.sequential("Gate D Restate foundation vectors", () => {
       "UNSUPPORTED_VALIDATOR_VERSION",
     );
   }, 120_000);
+
+  it("GateD-V5 fails explicitly for unsupported projection schema version at direct ingress", async () => {
+    await expectUnsupportedVersion(
+      "v5-unsupported-projection",
+      (input) => ({ ...input, projectionSchemaVersion: 2 }),
+      "UNSUPPORTED_PROJECTION_SCHEMA_VERSION",
+    );
+  }, 120_000);
 });

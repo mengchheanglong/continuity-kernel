@@ -29,7 +29,7 @@ export const commitInputSchema = z.strictObject({
 
 export type CommitInput = z.infer<typeof commitInputSchema>;
 
-type RequestValidationCode = "INVALID_REQUEST_SCHEMA" | "UNSUPPORTED_DOMAIN_SCHEMA_VERSION" | "UNSUPPORTED_AUTHORIZATION_MODEL_VERSION" | "UNSUPPORTED_REQUEST_HASH_SCHEMA_VERSION" | "UNSUPPORTED_VALIDATOR_VERSION";
+type RequestValidationCode = "INVALID_REQUEST_SCHEMA" | "UNSUPPORTED_DOMAIN_SCHEMA_VERSION" | "UNSUPPORTED_AUTHORIZATION_MODEL_VERSION" | "UNSUPPORTED_REQUEST_HASH_SCHEMA_VERSION" | "UNSUPPORTED_VALIDATOR_VERSION" | "UNSUPPORTED_PROJECTION_SCHEMA_VERSION";
 
 export class RequestValidationError extends Error {
   constructor(readonly code: RequestValidationCode = "INVALID_REQUEST_SCHEMA") { super(); this.message = code; this.name = "RequestValidationError"; }
@@ -48,6 +48,8 @@ export function parseCommitInput(input: unknown): CommitInput {
       && (input as { authorizationModelVersion: unknown }).authorizationModelVersion !== 1) throw new RequestValidationError("UNSUPPORTED_AUTHORIZATION_MODEL_VERSION");
   if (typeof input === "object" && input !== null && Object.hasOwn(input, "validatorVersion")
       && (input as { validatorVersion: unknown }).validatorVersion !== 1) throw new RequestValidationError("UNSUPPORTED_VALIDATOR_VERSION");
+  if (typeof input === "object" && input !== null && Object.hasOwn(input, "projectionSchemaVersion")
+      && (input as { projectionSchemaVersion: unknown }).projectionSchemaVersion !== 1) throw new RequestValidationError("UNSUPPORTED_PROJECTION_SCHEMA_VERSION");
   const parsed = commitInputSchema.safeParse(input);
   if (!parsed.success) throw new RequestValidationError();
   return parsed.data;
