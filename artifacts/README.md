@@ -11,6 +11,7 @@ Sealed phase decisions live here. Prefer the newest dated final for the active p
 | Gate D | `GATE_D_PASSES_FOUNDATION_V3` | `2026-07-11-gate-d-final.md` |
 | Foundation review | `APPROVE_T4_DETERMINISTIC_ACTOR` | `2026-07-11-foundation-review.md` |
 | T4 | `T4_PASSES_DETERMINISTIC_ACTOR` | `2026-07-11-t4-final.md` |
+| Consumer gate | `CONSUMER_GATE_INTERNAL_PASS` | `2026-07-11-consumer-gate.md` |
 
 ## Artifact rules
 

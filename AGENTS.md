@@ -8,8 +8,9 @@
 4. Read `docs/conformance-vectors.md` and `docs/implementation-matrix.md`.
 5. Read `docs/architecture/preflight-decisions.md`.
 6. Read `artifacts/2026-07-11-gate-d-final.md` for the foundation decision.
-7. Read `artifacts/2026-07-11-t4-final.md` for the current actor decision.
-8. For mission authority or research evidence, read the sibling files listed in `README.md`.
+7. Read `artifacts/2026-07-11-t4-final.md` for the actor decision.
+8. Read `artifacts/2026-07-11-consumer-gate.md` for the internal consumer/runbook decision.
+9. For mission authority or research evidence, read the sibling files listed in `README.md`.
 
 ## Current phase
 
@@ -20,11 +21,12 @@ T2 COMPLETE — DBOS_REJECTED_PENDING_ALTERNATIVE — 6ceb5b1
 T2B COMPLETE — RESTATE_PASSES_V4
 GATE D COMPLETE — GATE_D_PASSES_FOUNDATION_V3
 T4 COMPLETE — T4_PASSES_DETERMINISTIC_ACTOR
+CONSUMER GATE COMPLETE — CONSUMER_GATE_INTERNAL_PASS
 CUSTOM PERSISTENCE PARKED
 T5 AND LATER LOCKED
 ```
 
-The current decision is `artifacts/2026-07-11-t4-final.md`. Restate/PostgreSQL passes the complete frozen Gate-D foundation suite. One pure deterministic actor passes the frozen T4 vectors through the existing commit path. Custom persistence remains parked. T5 is not started automatically. Frozen expected outcomes remain immutable.
+The latest sealed improvement is `artifacts/2026-07-11-consumer-gate.md`. Restate/PostgreSQL foundation V3 and T4 remain green. A thin reference consumer and runbook exist. Custom persistence remains parked. T5 is not started. External demand is not claimed. Frozen expected outcomes remain immutable.
 
 ## Canonical rules
 

@@ -44,19 +44,32 @@ async function endpointReadySample(): Promise<number> {
   });
   try {
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("Endpoint readiness timeout")), 15_000);
-      child.once("exit", (code) => { clearTimeout(timer); reject(new Error(`Endpoint exited ${String(code)}`)); });
+      const timer = setTimeout(() => { reject(new Error("Endpoint readiness timeout")); }, 15_000);
+      child.once("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Endpoint exited ${String(code)}`));
+      });
       child.on("message", (message: unknown) => {
         if (typeof message !== "object" || message === null) return;
         const value = message as { type?: string; error?: string };
-        if (value.type === "ready") { clearTimeout(timer); resolve(); }
-        if (value.type === "error") { clearTimeout(timer); reject(new Error(value.error ?? "Endpoint failed")); }
+        if (value.type === "ready") {
+          clearTimeout(timer);
+          resolve();
+        }
+        if (value.type === "error") {
+          clearTimeout(timer);
+          reject(new Error(value.error ?? "Endpoint failed"));
+        }
       });
     });
     return performance.now() - started;
   } finally {
     if (child.exitCode === null) {
-      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      const exited = new Promise<void>((resolve) => {
+        child.once("exit", () => {
+          resolve();
+        });
+      });
       child.kill("SIGKILL");
       await exited;
     }

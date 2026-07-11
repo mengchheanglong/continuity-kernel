@@ -11,11 +11,12 @@ T2 DBOS COUNTEREXAMPLE: COMPLETE — DBOS_REJECTED_PENDING_ALTERNATIVE — 6ceb5
 T2B RESTATE: COMPLETE — RESTATE_PASSES_V4
 GATE D FOUNDATION: COMPLETE — GATE_D_PASSES_FOUNDATION_V3
 T4 DETERMINISTIC ACTOR: COMPLETE — T4_PASSES_DETERMINISTIC_ACTOR
+CONSUMER GATE: COMPLETE — CONSUMER_GATE_INTERNAL_PASS
 CUSTOM PERSISTENCE: PARKED
 T5 AND LATER: LOCKED
 ```
 
-The documentation baseline is commit `66fe2539f1ff1b93e38663e7b27c32804d2d0fc4`. T2 ended with the evidence-backed DBOS decision in `artifacts/2026-07-11-t2-final.md`. T2b completed with `RESTATE_PASSES_V4`; see `artifacts/2026-07-11-t2b-final.md`. Gate D completed with `GATE_D_PASSES_FOUNDATION_V3`; see `artifacts/2026-07-11-gate-d-final.md`. T4 completed within its original four-hour bound with `T4_PASSES_DETERMINISTIC_ACTOR`; see `artifacts/2026-07-11-t4-final.md`.
+The documentation baseline is commit `66fe2539f1ff1b93e38663e7b27c32804d2d0fc4`. T2 ended with the evidence-backed DBOS decision in `artifacts/2026-07-11-t2-final.md`. T2b completed with `RESTATE_PASSES_V4`; see `artifacts/2026-07-11-t2b-final.md`. Gate D completed with `GATE_D_PASSES_FOUNDATION_V3`; see `artifacts/2026-07-11-gate-d-final.md`. T4 completed with `T4_PASSES_DETERMINISTIC_ACTOR`; see `artifacts/2026-07-11-t4-final.md`. The internal consumer gate completed with `CONSUMER_GATE_INTERNAL_PASS`; see `artifacts/2026-07-11-consumer-gate.md`.
 
 ## Research question
 
@@ -69,6 +70,17 @@ See `docs/conformance-vectors.md` for exact fixtures and outcomes.
 ## Clock boundaries
 
 The T2 clock closed with decision commit `6ceb5b1`. T2b ran within its six-hour deadline and 150-line candidate cap. Gate D ran within its original eight-hour deadline and 400-line cap. T4 ran from `2026-07-11T15:46:31Z` to decision at `2026-07-11T18:47:37Z`, within its four-hour deadline and 140-line actor cap (116 counted lines).
+
+## Runnable harness
+
+See `docs/runbook.md` for setup, doctor, Gate D / T4 verification, and the thin reference consumer.
+
+```bash
+pnpm run doctor
+CK_RESTATE_DEPLOYMENT_URI=http://<host-ip>:9080 pnpm run example:consumer
+```
+
+The reference consumer is a second in-repo caller of the public commit path. It does not open T5 or claim external demand.
 
 ## Explicit exclusions
 
