@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { submitCommand as submitRestateCommand } from "../src/alternative/restate/client.js";
+import { buildCommitInput } from "../src/domain/request.js";
 import {
   completedRequest,
   createAdminSql,
@@ -139,5 +140,32 @@ describe.sequential("Gate D Restate foundation vectors", () => {
       commitmentStatus: null,
       payloadRef: null,
     });
+  }, 120_000);
+
+  it("GateD-V5 fails explicitly for unsupported domain schema version at direct ingress", async () => {
+    const workflowId = id("v5-unsupported-domain");
+    const commandId = id("v5-unsupported-domain-command");
+    const input = { ...buildCommitInput(commandId, completedRequest), domainSchemaVersion: 2 };
+    const worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+
+    const response = await fetch(
+      `http://127.0.0.1:8080/restate/call/ContinuityCommitT2bV1/${encodeURIComponent(workflowId)}/run`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) },
+    );
+    const responseText = await response.text();
+    const invocations = await queryRestate(
+      `select status, completion_result, completion_failure from sys_invocation where target_service_name = 'ContinuityCommitT2bV1' and target_service_key = '${workflowId}'`,
+    );
+
+    expect.soft(response.status).toBe(400);
+    expect.soft(responseText).toContain("UNSUPPORTED_DOMAIN_SCHEMA_VERSION");
+    expect.soft(responseText).not.toContain(commandId);
+    expect.soft(invocations.rows).toHaveLength(1);
+    expect.soft(invocations.rows[0]).toMatchObject({ status: "completed", completion_result: "failure" });
+    expect.soft(String(invocations.rows[0]?.completion_failure)).toContain("UNSUPPORTED_DOMAIN_SCHEMA_VERSION");
+    expect.soft(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
+    expect.soft(await readDomainState(admin)).toMatchObject({ version: "3", status: "open", payloadRef: null });
   }, 120_000);
 });
