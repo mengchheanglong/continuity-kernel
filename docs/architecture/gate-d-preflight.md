@@ -1,7 +1,7 @@
 # Gate D Preflight — Restate/PostgreSQL Foundation Integrity
 
 **Recorded:** 2026-07-11T07:02:18Z  
-**Status:** execution active; amended by Scope Reviews 1–3 before production GREEN
+**Status:** execution active; amended by Scope Reviews 1–4 before foundation decision
 **Baseline:** `4e43d892e0aa4459e6dfe44cf02c5377cf75116f`  
 **Prior decision:** `RESTATE_PASSES_V4`  
 **Evidence:** `artifacts/2026-07-11-t2b-final.md`
@@ -12,7 +12,7 @@ T2 rejected DBOS 4.23.6 for the frozen pre-commit recovery boundary. T2b then es
 
 Gate D is not another candidate comparison. It completes the surviving Restate/PostgreSQL foundation by running all six frozen vectors and all mandatory supporting assertions against one explicitly layered design.
 
-Scope Review 1 (`artifacts/2026-07-11-gate-d-scope-review-1.md`) supersedes incomplete evidence mappings in the original planning commit. Scope Review 2 (`artifacts/2026-07-11-gate-d-scope-review-2.md`) supersedes the pre-transaction concurrency barrier with an internal serializable-snapshot barrier. Scope Review 3 (`artifacts/2026-07-11-gate-d-scope-review-3.md`) restricts that barrier to attempt 1 and requires exact `pg_locks` identity proof. The original start time and deadline remain unchanged. Task 1 is historically complete and must not be rerun; the clock must not reset. No production GREEN may proceed until the Scope-Review-3 micro-review passes.
+Scope Review 1 (`artifacts/2026-07-11-gate-d-scope-review-1.md`) supersedes incomplete evidence mappings in the original planning commit. Scope Review 2 (`artifacts/2026-07-11-gate-d-scope-review-2.md`) supersedes the pre-transaction concurrency barrier with an internal serializable-snapshot barrier. Scope Review 3 (`artifacts/2026-07-11-gate-d-scope-review-3.md`) restricts that barrier to attempt 1 and requires exact `pg_locks` identity proof. Scope Review 4 (`artifacts/2026-07-11-gate-d-scope-review-4.md`) records the observed Restate 1.7.2 cancel-signal semantics and moves no-failpoint endpoint recovery before cancellation confirmation, while retaining quiescence, exact cancellation evidence, reconciliation, and the five-second no-late-effect window. The original start time and deadline remain unchanged. Task 1 is historically complete and must not be rerun; the clock must not reset.
 
 ```text
 SURVIVING DIRECTION: Restate 1.7.2 + SDK/client 1.15.1 + canonical PostgreSQL

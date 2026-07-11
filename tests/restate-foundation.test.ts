@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { submitCommand as submitRestateCommand } from "../src/alternative/restate/client.js";
+import { canonicalHash } from "../src/domain/canonical.js";
 import { buildCommitInput } from "../src/domain/request.js";
 import {
   cancelledRequest,
@@ -20,7 +21,7 @@ import {
   revokeGrant,
 } from "./db-fixture.js";
 
-interface WorkerMessage { type: string; error?: string }
+interface WorkerMessage { type: string; phase?: string; vector?: string; count?: number; error?: string }
 interface Worker { child: ChildProcess; logs: string[]; messages: WorkerMessage[] }
 type SubmitterMessage =
   | { type: "submitted"; invocationId: string }
@@ -70,8 +71,12 @@ function isSubmitterMessage(value: unknown): value is SubmitterMessage {
       && keys.join() === "code,status,type";
 }
 
-function spawnSubmitter(commandId: string, workflowId: string): Submitter {
-  const child = fork(new URL("./restate-submitter.ts", import.meta.url), [commandId, workflowId], {
+function spawnSubmitter(
+  commandId: string,
+  workflowId: string,
+  requestName: "completed" | "cancelled" = "completed",
+): Submitter {
+  const child = fork(new URL("./restate-submitter.ts", import.meta.url), [commandId, workflowId, requestName], {
     execPath: process.execPath,
     execArgv: ["--import", "tsx"],
     env: { ...process.env },
@@ -274,6 +279,16 @@ async function attachWorkflow(invocationId: string): Promise<Record<string, unkn
   return await response.json() as Record<string, unknown>;
 }
 
+async function expectAttachedReceipt(invocationId: string, commandId: string): Promise<Record<string, unknown>> {
+  const stored = await readStoredReceipt(fixture.namespaceId, commandId);
+  const expected = stored.projection === undefined
+    ? stored
+    : { ...stored, projectionDigest: canonicalHash(stored.projection) };
+  const attached = await attachWorkflow(invocationId);
+  expect(attached).toEqual(expected);
+  return attached;
+}
+
 async function readStoredReceipt(namespaceId: string, commandId: string): Promise<Record<string, unknown>> {
   const rows = await admin<{ result: Record<string, unknown> }[]>`
     SELECT result FROM continuity.command_receipts
@@ -315,6 +330,31 @@ async function purgeInvocation(invocationId: string): Promise<void> {
     await delay(25);
   }
   throw new Error("Purged invocation remained in supported Restate introspection");
+}
+
+async function requestCancellation(invocationId: string): Promise<void> {
+  const response = await fetch(
+    `http://127.0.0.1:9070/invocations/${encodeURIComponent(invocationId)}/cancel`,
+    { method: "PATCH" },
+  );
+  if (response.status !== 200 && response.status !== 202) {
+    throw new Error(`Invocation cancellation acknowledgement failed (${String(response.status)})`);
+  }
+}
+
+async function waitForCanceledInvocation(invocationId: string): Promise<Record<string, unknown>> {
+  const literal = restateString(invocationId);
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const result = await queryRestate(
+      `select status, completion_result, completion_failure from sys_invocation where id = ${literal}`,
+    );
+    const row = result.rows[0];
+    if (row?.status === "completed" && row.completion_result === "failure"
+      && row.completion_failure === "[409] Cancelled") return row;
+    await delay(25);
+  }
+  throw new Error("Cancellation-specific Restate terminal state was not confirmed within 10 seconds");
 }
 
 async function readDecisionAudits(): Promise<DecisionAudit[]> {
@@ -569,6 +609,138 @@ describe.sequential("Gate D Restate foundation vectors", () => {
     })]);
     expect(await readDomainCounts(admin)).toEqual({ receipts: 1, acceptedHistory: 1 });
     expect(await readDomainState(admin)).toMatchObject({ version: "4", status: "resolved", commitmentStatus: "completed" });
+  }, 120_000);
+
+  it("GateD-V3 returns one accepted and one expected-version conflict without a queue", async () => {
+    const commands = [
+      { commandId: id("v3-race-completed-command"), requestName: "completed" as const },
+      { commandId: id("v3-race-cancelled-command"), requestName: "cancelled" as const },
+    ] as const;
+    const barrier = await acquireSnapshotBarrier();
+    let worker!: Worker;
+    let first!: Submitter;
+    let second!: Submitter;
+    let invocationIds!: [string, string];
+    try {
+      worker = spawnWorker("snapshot_barrier");
+      await waitMessage(worker, (message) => message.type === "ready");
+      await registerDeployment();
+      first = spawnSubmitter(commands[0].commandId, id("v3-race-completed-workflow"), commands[0].requestName);
+      second = spawnSubmitter(commands[1].commandId, id("v3-race-cancelled-workflow"), commands[1].requestName);
+      expect(first.child.pid).toBeDefined();
+      expect(second.child.pid).toBeDefined();
+      expect(first.child.pid).not.toBe(second.child.pid);
+      const submissions = await Promise.all([
+        waitSubmitterMessage(first, "submitted"),
+        waitSubmitterMessage(second, "submitted"),
+      ]);
+      invocationIds = [submissions[0].invocationId, submissions[1].invocationId];
+      expect(new Set(invocationIds).size).toBe(2);
+      const waiters = await waitForSnapshotWaiters(barrier.identity, 2);
+      expect(barrier.pid).toBeGreaterThan(0);
+      expect(new Set(waiters.map((waiter) => waiter.pid)).size).toBe(2);
+      expect(first.messages.some((message) => message.type === "terminal")).toBe(false);
+      expect(second.messages.some((message) => message.type === "terminal")).toBe(false);
+      expect(first.child.exitCode).toBeNull();
+      expect(second.child.exitCode).toBeNull();
+      expect(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
+      expect(await readDomainState(admin)).toMatchObject({ version: "3", status: "open" });
+    } finally {
+      await barrier.release();
+    }
+
+    const terminals = await Promise.all([
+      waitSubmitterMessage(first, "terminal"),
+      waitSubmitterMessage(second, "terminal"),
+    ]);
+    expect(terminals).toEqual(expect.arrayContaining([
+      { type: "terminal", status: "accepted", code: "ACCEPTED" },
+      { type: "terminal", status: "rejected", code: "EXPECTED_VERSION_CONFLICT" },
+    ]));
+    const retried = await waitMessage(
+      worker,
+      (message) => message.type === "attempt" && message.vector === "V3" && (message.count ?? 0) > 1,
+    );
+    expect(retried).toEqual({ type: "attempt", vector: "V3", count: 2 });
+    expect(first).toMatchObject({ messages: [], invalidMessage: false });
+    expect(second).toMatchObject({ messages: [], invalidMessage: false });
+    const outcomes = await Promise.all([
+      expectAttachedReceipt(invocationIds[0], commands[0].commandId),
+      expectAttachedReceipt(invocationIds[1], commands[1].commandId),
+    ]);
+    const winner = outcomes.find((outcome) => outcome.status === "accepted");
+    if (winner === undefined) throw new Error("V3 race returned no accepted winner");
+    const expectedResolution = winner.commandId === commands[0].commandId ? "completed" : "cancelled";
+    expect(outcomes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: "accepted", code: "ACCEPTED", caseVersion: "4" }),
+      expect.objectContaining({ status: "rejected", code: "EXPECTED_VERSION_CONFLICT", caseVersion: "4" }),
+    ]));
+    expect(await readDomainCounts(admin)).toEqual({ receipts: 2, acceptedHistory: 1 });
+    expect(await readDomainState(admin)).toEqual({
+      version: "4", status: "resolved", commitmentDeadline: "2026-07-11 12:00:00+00",
+      commitmentStatus: expectedResolution, payloadRef: fixture.payloadRef,
+    });
+    const history = await admin<{ commandId: string; position: string }[]>`
+      SELECT command_id AS "commandId", position::text AS position
+      FROM continuity.accepted_history
+      WHERE namespace_id = ${fixture.namespaceId} AND case_id = ${fixture.caseId}
+    `;
+    expect(history).toEqual([{ commandId: winner.commandId, position: "4" }]);
+  }, 120_000);
+
+  it("GateD-V3 durably cancels retrying invocation and observes no late commit", async () => {
+    const workflowId = id("v3-watchdog-workflow");
+    const commandId = id("v3-watchdog-command");
+    let worker = spawnWorker("retry_forever");
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+    const started = Date.now();
+    const watchdog = delay(5_000).then(async () => {
+      const elapsed = Date.now() - started;
+      await kill(worker);
+      return elapsed;
+    });
+    const invocationId = await submitWorkflow(workflowId, commandId, completedRequest);
+    const repeated = await waitMessage(
+      worker,
+      (message) => message.type === "attempt" && message.vector === "V3" && (message.count ?? 0) > 1,
+    );
+    expect(repeated.count).toBeGreaterThan(1);
+    const watchdogElapsed = await watchdog;
+    expect(watchdogElapsed).toBeGreaterThanOrEqual(4_900);
+    expect(watchdogElapsed).toBeLessThanOrEqual(6_000);
+    expect(worker.child.exitCode !== null || worker.child.signalCode !== null).toBe(true);
+    const attempts = [repeated, ...worker.messages.filter((message) => message.type === "attempt")];
+    for (const attempt of attempts) {
+      expect(Object.keys(attempt).sort()).toEqual(["count", "type", "vector"]);
+      expect(attempt).toMatchObject({ type: "attempt", vector: "V3" });
+      expect(attempt.count).toBeGreaterThan(0);
+    }
+    expect(attempts.length).toBeGreaterThan(1);
+    expect(Math.max(...attempts.map((attempt) => attempt.count ?? 0))).toBeGreaterThan(5);
+    await requestCancellation(invocationId);
+    worker = spawnWorker();
+    await waitMessage(worker, (message) => message.type === "ready");
+    await registerDeployment();
+    const cancellation = await waitForCanceledInvocation(invocationId);
+    expect(cancellation).toEqual({
+      status: "completed", completion_result: "failure", completion_failure: "[409] Cancelled",
+    });
+    const attachedCancellation = await fetch(
+      `http://127.0.0.1:8080/restate/attach/${encodeURIComponent(invocationId)}`,
+    );
+    expect(attachedCancellation.status).toBe(409);
+    expect(await attachedCancellation.json()).toEqual({ code: 409, message: "Cancelled" });
+    expect(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
+    expect(await readDomainState(admin)).toEqual({
+      version: "3", status: "open", commitmentDeadline: null, commitmentStatus: null, payloadRef: null,
+    });
+
+    await delay(5_000);
+    expect(await readDomainCounts(admin)).toEqual({ receipts: 0, acceptedHistory: 0 });
+    expect(await readDomainState(admin)).toEqual({
+      version: "3", status: "open", commitmentDeadline: null, commitmentStatus: null, payloadRef: null,
+    });
   }, 120_000);
 
   it("GateD supporting assertion keeps command IDs independent across namespaces", async () => {

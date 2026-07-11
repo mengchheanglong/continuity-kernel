@@ -50,11 +50,12 @@ function postgresCode(error: unknown): string | undefined {
 }
 
 async function commit(commandId: string, requestHash: string, request: unknown, validatorVersion: number, projectionSchemaVersion: number): Promise<CommitResult> {
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
+  for (let attempt = 1; attempt <= 5 || process.env.CK_FAILPOINT === "retry_forever"; attempt += 1) {
+    if (process.env.CK_FAILPOINT === "retry_forever" || process.env.CK_FAILPOINT === "snapshot_barrier") process.send?.({ type: "attempt", vector: "V3", count: attempt });
     try {
       return await app.begin("isolation level serializable", async (sql) => {
         const failpoint = process.env.CK_FAILPOINT;
-        if (failpoint === "after_write" || (failpoint === "snapshot_barrier" && attempt === 1)) {
+        if (failpoint === "after_write" || failpoint === "retry_forever" || (failpoint === "snapshot_barrier" && attempt === 1)) {
           await sql`SELECT pg_catalog.set_config('continuity.test_failpoint', ${failpoint}, true)`;
         }
         const rows = await sql<{ result: CommitResult }[]>`
@@ -70,7 +71,7 @@ async function commit(commandId: string, requestHash: string, request: unknown, 
       });
     } catch (error) {
       if (postgresCode(error) !== "40001") throw error;
-      if (attempt === 5) throw new restate.TerminalError("Serializable transaction retry limit exceeded");
+      if (attempt === 5 && process.env.CK_FAILPOINT !== "retry_forever") throw new restate.TerminalError("Serializable transaction retry limit exceeded");
     }
   }
   throw new Error("Serializable retry loop ended without a result");

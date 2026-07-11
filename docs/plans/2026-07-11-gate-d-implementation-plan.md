@@ -314,12 +314,12 @@ Cancellation test:
 4. at the frozen five-second watchdog, externally kill the endpoint;
 5. observe direct-child exit and PostgreSQL datasource-backend disappearance within 45 seconds;
 6. call `PATCH /invocations/{id}/cancel` and accept documented `200` or `202` management acknowledgement;
-7. poll supported invocation fields until a cancellation-specific terminal result appears within ten seconds; a generic completed/failed status is insufficient;
-8. reconcile PostgreSQL receipt/state only after quiescence and cancellation confirmation;
-9. restart the same endpoint without the failpoint;
-10. observe five seconds and prove no transition/receipt/history appears.
+7. restart and register the same endpoint without the failpoint so the appended cancel signal can be consumed;
+8. within ten seconds of registration, require supported SQL to report exact failure `[409] Cancelled` and public attachment to return exact HTTP `409` body `{code:409,message:"Cancelled"}`; a generic completed/failed status is insufficient;
+9. reconcile PostgreSQL receipt/state only after quiescence and cancellation confirmation;
+10. observe five seconds on that no-failpoint endpoint and prove no transition/receipt/history appears.
 
-Pinned Restate 1.7.2 source defines cancellation as the `ABORTED` invocation failure with message `canceled`. Supported SQL evidence must therefore show `status='completed'`, `completion_result='failure'`, and `completion_failure` identifying `canceled`/`ABORTED`; do not accept an unrelated terminal failure.
+Pinned Restate 1.7.2 source defines cancellation as error code `ABORTED=409` with message `canceled`. Its supported SQL and public attachment surfaces normalize that to `[409] Cancelled` and `{code:409,message:"Cancelled"}` respectively; require both exact representations and do not accept an unrelated terminal failure.
 
 **Minimal production change:** test-only failpoint handling may keep retrying past the normal limit; ordinary production behavior retains the five-attempt terminal bound. No request fields, payload references, hashes, or IDs may enter retry IPC.
 
