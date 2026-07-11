@@ -1,7 +1,7 @@
 # Gate D Preflight — Restate/PostgreSQL Foundation Integrity
 
 **Recorded:** 2026-07-11T07:02:18Z  
-**Status:** frozen planning candidate; execution clock not started  
+**Status:** execution active; amended by Scope Reviews 1–3 before production GREEN
 **Baseline:** `4e43d892e0aa4459e6dfe44cf02c5377cf75116f`  
 **Prior decision:** `RESTATE_PASSES_V4`  
 **Evidence:** `artifacts/2026-07-11-t2b-final.md`
@@ -12,11 +12,13 @@ T2 rejected DBOS 4.23.6 for the frozen pre-commit recovery boundary. T2b then es
 
 Gate D is not another candidate comparison. It completes the surviving Restate/PostgreSQL foundation by running all six frozen vectors and all mandatory supporting assertions against one explicitly layered design.
 
+Scope Review 1 (`artifacts/2026-07-11-gate-d-scope-review-1.md`) supersedes incomplete evidence mappings in the original planning commit. Scope Review 2 (`artifacts/2026-07-11-gate-d-scope-review-2.md`) supersedes the pre-transaction concurrency barrier with an internal serializable-snapshot barrier. Scope Review 3 (`artifacts/2026-07-11-gate-d-scope-review-3.md`) restricts that barrier to attempt 1 and requires exact `pg_locks` identity proof. The original start time and deadline remain unchanged. Task 1 is historically complete and must not be rerun; the clock must not reset. No production GREEN may proceed until the Scope-Review-3 micro-review passes.
+
 ```text
 SURVIVING DIRECTION: Restate 1.7.2 + SDK/client 1.15.1 + canonical PostgreSQL
 CUSTOM PERSISTENCE: PARKED
 FOUNDATION PROMOTION: NOT YET CLAIMED
-GATE D CLOCK: NOT STARTED
+GATE D CLOCK: STARTED 2026-07-11T07:12:49Z; DEADLINE 2026-07-11T15:12:49Z
 ```
 
 ## Objective
@@ -68,8 +70,8 @@ If these conflict, stop before implementation. Do not edit a frozen expected out
 Not every transaction-internal property must be forced through Restate when the public runtime cannot expose a deterministic barrier without changing canonical SQL. Gate D uses the narrowest authoritative layer:
 
 - **Restate end to end:** runtime submission, attachment, workflow-key semantics, process restart, cancellation, supported purge, durable journal/privacy, and external-kill recovery.
-- **Canonical PostgreSQL integration:** grant/case lock ordering, transaction rollback, role privileges, cross-namespace receipts, unsupported validator/projection versions, and exact state/history/audit records.
-- **Pure canonicalization:** RFC 8785/I-JSON adversarial vectors and frozen hashes.
+- **Canonical PostgreSQL integration:** grant/case lock ordering, transaction rollback, object ownership/function privileges, cross-namespace receipts, unsupported validator/projection versions, and exact state/history/audit records.
+- **Pure canonicalization/raw ingestion:** RFC 8785/I-JSON adversarial vectors, duplicate-key-aware `parseCanonicalJson`, and frozen hashes.
 
 A direct PostgreSQL test cannot prove a Restate durability claim. A Restate workflow key cannot prove semantic request equality. Passing requires the combined surviving-direction aggregate.
 
@@ -80,12 +82,12 @@ A direct PostgreSQL test cannot prove a Restate durability claim. A Restate work
 | V1A out-of-scope | Restate submission returns typed authorization rejection; no accepted state/history; privacy-limited audit exists | `tests/restate-foundation.test.ts` + database probes |
 | V1B revocation-first | version-8 revocation commits first; Restate returns revoked/version conflict; prior state remains | Restate foundation test using existing `revokeGrant` |
 | V1C command-first | canonical command locks/checks first, one commit, revocation waits then reaches version 8 | existing deterministic `tests/database.test.ts` barrier |
-| V2A same ID/hash | concurrent Restate submissions return one stored receipt and one transition | Restate foundation test, same and distinct workflow keys |
+| V2A same ID/hash | two independent submitter processes/connections overlap; same-key case may coalesce to one Restate invocation waiting inside transaction attempt 1, while distinct-key case proves two version-3 snapshots through two exact ungranted `ShareLock` waiters on the parent's known snapshot-barrier advisory-lock identity; retries run without the barrier and both cases return one stored receipt/transition | Restate foundation test + test-only submitter children + attempt-1 `snapshot_barrier` function branch |
 | V2B different hash | caller boundary and PostgreSQL receipt both reject; survives endpoint restart, new workflow key, and supported completed-invocation purge | Restate foundation test; `PATCH /invocations/{id}/purge` only after completion |
-| V3 conflict | distinct workflow keys run concurrently without queue/concurrency-one; one accepted and one expected-version conflict | Restate foundation test |
-| V3 watchdog/cancel | forced `40001` retries observed without payload data; parent kills endpoint at five seconds, calls `PATCH /invocations/{id}/cancel`, confirms cancellation and no late commit after restart | Restate foundation/worker test; existing SQL `retry_forever` failpoint |
+| V3 conflict | two independent submitter processes/connections and distinct workflow keys each establish an attempt-1 serializable snapshot that observes version 3, then appear as exact ungranted `ShareLock` waiters on the parent's known snapshot-barrier advisory-lock identity before concurrent release; retries run normally without the barrier; no queue/concurrency-one; one accepted and one expected-version conflict | Restate foundation test + test-only submitter children + attempt-1 `snapshot_barrier` function branch |
+| V3 watchdog/cancel | forced `40001` retries observed without payload data; parent kills endpoint at five seconds, observes child exit and datasource-backend disappearance, calls `PATCH /invocations/{id}/cancel`, confirms cancellation-specific terminal state and no late commit after restart | Restate foundation/worker test; existing SQL `retry_forever` failpoint |
 | V4A/V4B/V4C | unchanged external-kill and recovery behavior | existing `tests/restate-crash.test.ts` |
-| V5 digest/version | exact frozen digest after restart; malformed/undeclared input fails before approved submission; unsupported request schema fails closed; direct canonical tests retain validator/projection failures | Restate foundation + existing canonical/database tests |
+| V5 digest/version | exact frozen digest after restart; strict object boundary and raw-JSON ingestion fail closed; unsupported domain, request-hash, authorization-model, validator/rule, projection, serializer, and runtime-application versions fail explicitly | Restate foundation + existing canonical/database tests |
 | V6 erasure | opaque `PayloadRef` only; required state/history survives deletion; sentinel and SHA-256 derivatives absent from logical application data, Restate journal/metadata/errors, and logs | Restate foundation/crash + database scans + supported Admin SQL |
 
 ## Invariant coverage matrix
@@ -99,19 +101,20 @@ A direct PostgreSQL test cannot prove a Restate durability claim. A Restate work
 | 5. Minimum auditable history | V1 privacy-limited rejection audit, V4 receipt/history counts, and V6 erasure with required history intact |
 | 6. Atomicity, concurrency, and conflict-aware idempotency | V2 receipt equality/mismatch, V3 one-winner race, transaction rollback, and V4 exactly-once canonical outcome |
 | 7. Recovery equivalence | V4A/V4B/V4C, V5 restart digest, and V3 durable-cancellation/no-late-commit distinction |
-| 8. Causal traceability | V1 rejection reasons plus accepted receipt/history actor, command, authorization, validator, and resulting record fields |
-| 9. Explicit time and external inputs | frozen request hash/time fixtures and canonical JSON/I-JSON adversarial tests; no randomness/model input |
-| 10. Versioned authority and adapters | V1 authorization version, V2 request hash, V5 explicit supported pins and closed failures for unsupported request/validator/projection versions |
+| 8. Causal traceability | for root commands, causation is the durable `(command_id, request_hash)` pair and correlation is durable `(namespace_id, case_id)`; tests also assert actor, grant/version, validator, position, and resulting record |
+| 9. Explicit time and external inputs | hashed semantic `worldTime`; PostgreSQL `ingestion_time` as the canonical commit's wall-clock sample; operational wall clock is non-authoritative and cannot change request hash/projection digest; no randomness/model input |
+| 10. Versioned authority and adapters | strict technical `CommitInput` compatibility envelope plus explicit closed failures for domain, request-hash, authorization-model, validator/rule, projection, serializer, and runtime-application versions |
 
 ### Mandatory supporting assertions
 
 The aggregate must also retain or add explicit evidence for:
 
 - all-or-none rollback;
-- runtime-role DML, truncate, role escalation, ownership, and public-execution negatives;
+- catalog proof that canonical objects remain owned by `continuity_owner`, `continuity_app` has no ownership/owner-role membership, `PUBLIC` has no commit-function execution, and runtime-role DML/truncate/role escalation/unauthorized reads fail;
 - cross-namespace command-ID independence;
 - supported runtime-history purge cannot bypass PostgreSQL receipts;
-- malformed, extra-property, unsupported-schema, lone-surrogate, duplicate-key, non-finite, and `undefined` inputs fail closed at the appropriate boundary;
+- independent submitter processes/connections and deterministic same-version barriers for V2A/V3;
+- strict complete `CommitInput` plus semantic request validation; malformed, extra-property, unsupported-schema/version, lone-surrogate, non-finite, negative-zero, unsafe-number, and `undefined` object inputs fail closed through the approved caller/handler boundary; duplicate-key raw JSON fails through `parseCanonicalJson` before object submission;
 - cancellation is durable and no commit appears during the five-second post-restart window;
 - all fixtures remain synthetic and contain no real personal, biometric, medical, or neural data;
 - no Restate internal table/file/protocol or embedded state is used.
@@ -133,7 +136,22 @@ The purge assertion may run only on a completed invocation. It must independentl
 
 ## Runtime-schema and privacy boundary
 
-The approved caller/server boundary must validate the complete declared command schema before `workflowSubmit` so undeclared optional bytes cannot enter Restate through that path. The workflow handler must independently validate direct/tampered input and fail terminally before PostgreSQL.
+The approved caller/server boundary must validate a strict complete `CommitInput` before `workflowSubmit` so undeclared optional bytes cannot enter Restate through that path. The workflow handler must independently validate direct/tampered input and fail terminally before PostgreSQL.
+
+The technical envelope is outside the frozen semantic request hash and contains exactly:
+
+```text
+domainSchemaVersion=1
+authorizationModelVersion=1
+validatorVersion=1
+projectionSchemaVersion=1
+serializerVersion=rfc8785-sha256-base64url-nopad-v1
+runtimeApplicationVersion=continuity-kernel-restate-gate-d-v1
+commandId=<opaque command ID>
+request=<unchanged frozen semantic request>
+```
+
+Unsupported technical versions fail with fixed data-free local/terminal codes. The approved object boundary runs strict schema plus I-JSON/canonical validation before submission. `parseCanonicalJson` is the raw-JSON ingestion boundary and remains responsible for duplicate-key detection before an object can reach Restate. No technical envelope field is added to the semantic request or frozen request hash.
 
 This does not claim Restate can erase bytes that an unauthorized caller directly submits to ingress before application validation; such direct ingress is outside the approved boundary and remains an explicit operational access-control concern. Gate D proves that the approved boundary sends only the synthetic semantic request and opaque `PayloadRef`.
 
@@ -168,13 +186,14 @@ Counted production path:
 
 ```text
 src/domain/canonical.ts
+src/domain/request.ts
 src/alternative/restate/**/*.ts
 migrations/001_continuity.sql
 ```
 
 Tests, generated files, package/lockfiles, Compose, documentation, artifacts, and measurement scripts are excluded. Record each file and the exact total. No required production code may be hidden in tests to fit the cap.
 
-No dependency or migration change is expected. If a RED test proves either is necessary, stop for a dated narrow scope review before changing it.
+No dependency or new migration is expected. Scope Review 1 authorizes the strict technical compatibility envelope and stronger tests. Scope Reviews 2–3 additionally authorize only a counted test-only `snapshot_barrier` branch at the start of the existing `continuity.commit_command` function body, before its command-ID advisory lock and receipt lookup, plus harness code: only transaction attempt 1 performs the non-locking expected-version check and `pg_advisory_xact_lock_shared`; retries run without that failpoint. The parent uses a dedicated known PID/exclusive lock, and the observer must match each child PID as an ungranted `ShareLock` on the identical `pg_locks` advisory tuple, not generic activity. This does not authorize a table/column/index/role/ACL schema change, semantic request/hash change, dependency, queue, concurrency-one setting, or custom persistence. Any further need requires another dated stop review.
 
 ## Clock/start procedure
 
@@ -196,7 +215,7 @@ Every missing assertion follows RED → GREEN → REFACTOR:
 
 1. add one named failing test without changing frozen fixtures;
 2. run only that test and retain the expected failure;
-3. make the smallest production or test-harness change;
+3. make the smallest production or test-harness change allowed by the current dated scope review;
 4. rerun the focused test;
 5. run the Gate-D aggregate;
 6. commit a verified slice.

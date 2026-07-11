@@ -10,6 +10,8 @@
 
 **Authority:** `docs/architecture/gate-d-preflight.md`
 
+**Scope amendments:** `artifacts/2026-07-11-gate-d-scope-review-1.md` corrects the original evidence map; `artifacts/2026-07-11-gate-d-scope-review-2.md` replaces the inadequate pre-transaction race barrier with the counted internal serializable-snapshot barrier; `artifacts/2026-07-11-gate-d-scope-review-3.md` limits that barrier to attempt 1 and requires exact advisory-lock identity proof. The original clock continues; Task 1 is complete and must not be rerun or reset. No semantic request/hash, table/column/index/role/ACL schema, dependency, queue, concurrency-one, or custom persistence change is authorized.
+
 ---
 
 ## Task 0: Freeze and publish Gate-D planning
@@ -37,7 +39,7 @@ git commit -m "docs: freeze Gate D execution plan"
 git push origin main
 ```
 
-## Task 1: Start the Gate-D clock
+## Task 1: Start the Gate-D clock — HISTORICALLY COMPLETE; DO NOT RERUN
 
 **Objective:** Record a clean immutable start immediately before the first executable Gate-D change.
 
@@ -110,50 +112,80 @@ CK_RESTATE_DEPLOYMENT_URI=http://<verified-host-ip>:9080 \
 
 **Commit:** Do not commit RED alone unless needed as explicit evidence; retain command/output in the final artifact.
 
-## Task 3: Implement minimal dual boundary validation
+## Task 3: Implement strict semantic request and technical-envelope validation
 
-**Objective:** Make malformed and undeclared input fail closed before approved submission and independently before PostgreSQL in the handler.
+**Objective:** Make malformed, undeclared, and compatibility-mismatched input fail closed before approved submission and independently before PostgreSQL in the handler, without changing the frozen semantic request/hash.
 
 **Files:**
+- Create: `src/domain/request.ts`
 - Modify: `src/alternative/restate/client.ts`
 - Modify: `src/alternative/restate/index.ts`
 - Test: `tests/restate-foundation.test.ts`
+- Modify: `tests/restate-crash.test.ts` only to construct the strict technical envelope; V4A/V4B/V4C failpoints, kill points, barriers, expected outcomes, and assertions remain unchanged
 
-**Minimal implementation shape:**
+**Required shape:**
 
-```ts
-const requestSchema = z.strictObject({
-  requestHashSchemaVersion: z.literal(1),
-  namespaceId: z.string(),
-  caseId: z.string(),
-  actorId: z.string(),
-  authorizationGrantId: z.string(),
-  authorizationVersion: z.string().regex(/^(0|[1-9]\d*)$/u),
-  expectedCaseVersion: z.string().regex(/^(0|[1-9]\d*)$/u),
-  actionType: z.literal("resolve_case"),
-  actionPayload: z.strictObject({
-    commitmentDeadline: z.iso.datetime(),
-    payloadRef: z.string(),
-    resolution: z.enum(["completed", "cancelled"]),
-  }),
-  worldTime: z.iso.datetime(),
-});
+- one shared strict semantic request schema matching the frozen request exactly;
+- one shared strict `CommitInput` schema containing `commandId`, unchanged `request`, and these technical pins outside the semantic hash:
+
+```text
+domainSchemaVersion=1
+authorizationModelVersion=1
+validatorVersion=1
+projectionSchemaVersion=1
+serializerVersion=rfc8785-sha256-base64url-nopad-v1
+runtimeApplicationVersion=continuity-kernel-restate-gate-d-v1
 ```
 
-- Export one shared parser/schema from the production Restate module or a counted `schema.ts`; do not duplicate contract logic.
-- Client parses before `canonicalHash` and before `workflowSubmit`.
-- Handler parses independently and throws a typed `restate.TerminalError` before `ctx.run`/PostgreSQL.
-- Do not include input data or validation issue values in durable/logged error text; use a fixed machine-readable code such as `INVALID_REQUEST_SCHEMA`.
+Compatibility and validation failures must be distinguishable by these fixed data-free codes:
+
+```text
+INVALID_REQUEST_SCHEMA
+INVALID_CANONICAL_REQUEST
+UNSUPPORTED_DOMAIN_SCHEMA_VERSION
+UNSUPPORTED_REQUEST_HASH_SCHEMA_VERSION
+UNSUPPORTED_AUTHORIZATION_MODEL_VERSION
+UNSUPPORTED_VALIDATOR_VERSION
+UNSUPPORTED_PROJECTION_SCHEMA_VERSION
+UNSUPPORTED_SERIALIZER_VERSION
+UNSUPPORTED_RUNTIME_APPLICATION_VERSION
+```
+
+- IDs/payload reference are nonempty strings;
+- decimal versions use `^(0|[1-9]\d*)$`;
+- `commitmentDeadline` and `worldTime` use Z-only RFC 3339 UTC (`z.iso.datetime()` plus focused offset-negative tests);
+- client validates the complete wrapper and canonicalizes the parsed semantic request before `workflowSubmit`;
+- handler independently validates the complete wrapper and canonicalizes before `ctx.run`/PostgreSQL;
+- schema failures, canonical/I-JSON failures, and every technical-version mismatch return fixed data-free local/terminal codes; no issue paths/values or input are logged;
+- handler passes validated `validatorVersion` and `projectionSchemaVersion` to the canonical function instead of hardcoding hidden values;
+- `parseCanonicalJson` remains the raw-JSON ingestion boundary for duplicate-key rejection; do not invent a second parser.
+
+After the established undeclared-payload RED, refine only its error-type assertion from raw `ZodError` to the fixed local `INVALID_REQUEST_SCHEMA` error required by Scope Review 1, without changing its zero-invocation/zero-receipt/prior-state assertions. Rerun and retain the same decisive RED before production. Then turn it green and add each next malformed/version test one at a time, observing RED before GREEN:
+
+```text
+GateD-V5 rejects malformed direct ingress input without a canonical transition
+GateD-V5 rejects unsupported domain schema version
+GateD-V5 rejects unsupported request-hash schema version
+GateD-V5 rejects unsupported authorization-model version
+GateD-V5 rejects unsupported validator/rule version
+GateD-V5 rejects unsupported projection version
+GateD-V5 rejects unsupported serializer version
+GateD-V5 rejects unsupported runtime-application version
+GateD-V5 rejects non-UTC offset time, lone surrogate, non-finite, negative-zero, unsafe-number, and undefined object input
+```
+
+Retain the pure raw-ingestion duplicate-key test against `parseCanonicalJson` and exact frozen hashes.
 
 **GREEN commands:**
 
 ```bash
 CK_RESTATE_DEPLOYMENT_URI=http://<verified-host-ip>:9080 pnpm exec vitest run tests/restate-foundation.test.ts --no-file-parallelism --bail=1 -t 'GateD-V5'
+CK_RESTATE_DEPLOYMENT_URI=http://<verified-host-ip>:9080 pnpm exec vitest run tests/restate-crash.test.ts --no-file-parallelism --bail=1
 pnpm run typecheck
 pnpm run lint
 ```
 
-**Expected:** all three V5 boundary tests pass; candidate/combined count remains at or below 400.
+**Expected:** all added V5 boundary/version tests and unchanged V4 tests pass; combined counted source remains at or below 400.
 
 **Commit:** `feat: validate Restate command boundary`
 
@@ -205,16 +237,26 @@ CK_RESTATE_DEPLOYMENT_URI=http://<verified-host-ip>:9080 pnpm exec vitest run te
 
 **Files:**
 - Modify: `tests/restate-foundation.test.ts`
+- Create: `tests/restate-submitter.ts`
+- Modify: `src/alternative/restate/index.ts`
+- Modify: `migrations/001_continuity.sql` only for the counted `snapshot_barrier` function branch
 - Modify only if a public helper is reusable: `src/alternative/restate/client.ts`
 
 **Tests:**
 
 ```text
-GateD-V2A returns one stored receipt for concurrent same-hash submissions
+GateD-V2A returns one stored receipt for two independent same-hash submitters using the same workflow key
+GateD-V2A returns one stored receipt for two independent same-hash submitters using distinct workflow keys
 GateD-V2B rejects different hash across same and new workflow keys
 GateD-V2B preserves receipt authority after endpoint restart and supported invocation purge
 GateD supporting assertion keeps command IDs independent across namespaces
 ```
+
+Before either V2A case, a dedicated parent database session records its PID and acquires the exclusive advisory lock identified by `hashtextextended('continuity-gate-d-snapshot-barrier',0)`. Under `CK_FAILPOINT=snapshot_barrier`, only attempt 1 of each invocation's serializable datasource loop sets `continuity.test_failpoint='snapshot_barrier'`; every retry runs the normal function without that setting. The counted function branch runs before the existing command-ID advisory lock and receipt lookup, performs a non-locking case-version read, requires the observed version to equal the request's expected version (`3` for the frozen fixture), and waits with `pg_advisory_xact_lock_shared` on the same key. This placement is mandatory because distinct-key V2A uses the same command ID.
+
+A separate observer queries `pg_locks`, locates the parent's granted `ExclusiveLock` by known PID, captures its exact advisory identity tuple `(database,classid,objid,objsubid)`, and requires each child as a distinct PID with `mode='ShareLock'`, `granted=false`, and the identical tuple. Generic `pg_stat_activity`/lock-wait counts cannot pass. This proves each attempt-1 transaction passed the version-3 read and waits on the intended barrier rather than the command-ID lock. The parent releases its lock in `finally`; compatible shared waiters proceed concurrently. Retries then bypass the barrier, allowing V2A to read the stored receipt and V3 to return `EXPECTED_VERSION_CONFLICT`. Never use exclusive transaction locks, queues, or concurrency-one as proof.
+
+Launch two direct submitter child processes/connections. Each child uses the public Restate SDK and approved strict-envelope builder, sends only sanitized IPC (`submitted` with invocation ID, then terminal status/code), and never sends request bodies, payload references, hashes, or sentinels. In the same-workflow-key case, require exactly one waiting datasource transaction, start the second submitter while the first remains blocked, prove both submissions remain outstanding and may share one invocation ID, then release. In the distinct-key case, require two distinct waiting datasource backends/transactions before release. Assert both results equal the one stored PostgreSQL receipt, with exactly one transition/history row.
 
 Purge procedure:
 
@@ -243,6 +285,7 @@ CK_RESTATE_DEPLOYMENT_URI=http://<verified-host-ip>:9080 pnpm exec vitest run te
 
 **Files:**
 - Modify: `tests/restate-foundation.test.ts`
+- Reuse: `tests/restate-submitter.ts`
 - Modify: `src/alternative/restate/index.ts`
 - Modify if message types are shared: `tests/restate-worker.ts`
 
@@ -255,9 +298,13 @@ GateD-V3 durably cancels retrying invocation and observes no late commit
 
 Race test:
 
-- use distinct command IDs and distinct workflow keys;
-- submit completed/cancelled fixtures concurrently;
-- assert one accepted, one `EXPECTED_VERSION_CONFLICT`, version 4, one accepted history, and no fork.
+- use two independent submitter child processes/connections with distinct command IDs and distinct workflow keys;
+- a dedicated parent session records its PID and holds the snapshot-barrier `ExclusiveLock` before submission;
+- under `CK_FAILPOINT=snapshot_barrier`, only attempt 1 sets the local failpoint; require two distinct attempt-1 datasource PIDs represented in `pg_locks` as ungranted `ShareLock` rows matching the exact `(database,classid,objid,objsubid)` tuple of the parent's granted advisory lock;
+- reaching those exact waits proves each transaction already observed case version 3 and is not blocked on the command-ID lock;
+- verify canonical state remains version 3 and both submitters are outstanding, then release the parent lock so both compatible shared waiters proceed concurrently;
+- retries must run without `snapshot_barrier`; assert one accepted, one `EXPECTED_VERSION_CONFLICT` after the required serialization retry, version 4, one accepted history, and no fork;
+- generic datasource/lock-wait counts cannot pass; retain the no-queue/no-concurrency-one rule and release the parent lock in `finally`.
 
 Cancellation test:
 
@@ -265,11 +312,14 @@ Cancellation test:
 2. emit IPC messages containing exactly `{type:"attempt", vector:"V3", count}`;
 3. observe more than one attempt;
 4. at the frozen five-second watchdog, externally kill the endpoint;
-5. call `PATCH /invocations/{id}/cancel`;
-6. use supported SQL introspection to confirm terminal cancellation within ten seconds;
-7. reconcile PostgreSQL receipt/state;
-8. restart the same endpoint without the failpoint;
-9. observe five seconds and prove no transition/receipt/history appears.
+5. observe direct-child exit and PostgreSQL datasource-backend disappearance within 45 seconds;
+6. call `PATCH /invocations/{id}/cancel` and accept documented `200` or `202` management acknowledgement;
+7. poll supported invocation fields until a cancellation-specific terminal result appears within ten seconds; a generic completed/failed status is insufficient;
+8. reconcile PostgreSQL receipt/state only after quiescence and cancellation confirmation;
+9. restart the same endpoint without the failpoint;
+10. observe five seconds and prove no transition/receipt/history appears.
+
+Pinned Restate 1.7.2 source defines cancellation as the `ABORTED` invocation failure with message `canceled`. Supported SQL evidence must therefore show `status='completed'`, `completion_result='failure'`, and `completion_failure` identifying `canceled`/`ABORTED`; do not accept an unrelated terminal failure.
 
 **Minimal production change:** test-only failpoint handling may keep retrying past the normal limit; ordinary production behavior retains the five-attempt terminal bound. No request fields, payload references, hashes, or IDs may enter retry IPC.
 
@@ -287,17 +337,28 @@ CK_RESTATE_DEPLOYMENT_URI=http://<verified-host-ip>:9080 pnpm exec vitest run te
 
 **Files:**
 - Modify: `tests/restate-foundation.test.ts`
+- Modify: `tests/database.test.ts`
 - Modify if shared scanning is extracted: `tests/db-fixture.ts`
-- Reuse: `tests/canonical.test.ts`, `tests/database.test.ts`, `tests/restate-crash.test.ts`
+- Reuse: `tests/canonical.test.ts`, `tests/restate-crash.test.ts`
 
-**V5 tests:**
+**V5 and invariant tests:**
 
 ```text
 GateD-V5 returns the exact frozen projection digest after endpoint restart
 GateD-V5 records supported Restate service/deployment version through public introspection
+GateD-V5 fails explicitly for every unsupported technical compatibility version
+GateD invariant 8 maps root-command causation and case correlation to durable fields
+GateD invariant 9 distinguishes semantic world time, canonical ingestion sample, and non-authoritative operational clock
+GateD privileges keep canonical objects owned by continuity_owner
+GateD privileges deny continuity_app ownership, owner-role membership, direct DML/truncate/read, and role escalation
+GateD privileges revoke PUBLIC execution while continuity_app retains only approved function execution
 ```
 
-Retain existing direct failures for unsupported request-hash, validator, and projection versions, plus all canonical JSON adversarial tests. Record serializer/runtime pin checks as static evidence; do not add fake version fields to semantic requests.
+Retain direct database failures for unsupported request-hash, validator, and projection versions and all canonical JSON/raw-ingestion tests. The Restate compatibility-envelope tests must explicitly reject unsupported domain, authorization-model, serializer, and runtime-application versions; static pin evidence alone cannot pass V5.
+
+For Invariant 8, assert the durable root-command mapping exactly: causation = `(command_id, request_hash)` and correlation = `(namespace_id, case_id)`, plus actor, grant/version, validator, position, and resulting record. Do not claim parent-command chains.
+
+For Invariant 9, assert `world_time` is the hashed semantic request value, `ingestion_time` is PostgreSQL's canonical wall-clock sample, operational delays do not enter request hashes/digests, and no randomness/model/external observation influences canonical state.
 
 **V6 test expansion:**
 
@@ -373,7 +434,7 @@ Also run:
 
 - frozen-file diff checks;
 - private Restate API/storage/state scan;
-- sentinel/derived-hash scans over source, supported journal/metadata, logs, and artifacts;
+- sentinel/derived-hash scans with an explicit allowlist for `docs/conformance-vectors.md` and synthetic test-fixture declarations; zero matches required in production source, approved runtime inputs/results/errors, supported journal/metadata, logs, and exported evidence;
 - exact candidate and combined line count;
 - pinned image/deployment verification;
 - orphan worker/backend checks.
@@ -409,7 +470,7 @@ Then update Mission Control in a separate local research commit, preserve pre-ex
 - [ ] Transaction-internal claims use canonical PostgreSQL integration tests.
 - [ ] No DBOS pass is required from the rejected adapter.
 - [ ] TDD precedes every production change.
-- [ ] No new dependency or migration is expected.
+- [ ] No new dependency or new migration exists; the only existing-migration edit is the Scope-Reviews-2–3 counted attempt-1 `snapshot_barrier` function branch, before command locking/receipt lookup, with no table/column/index/role/ACL change.
 - [ ] Combined production path remains at or below 400 lines.
 - [ ] Eight-hour clock starts only after the committed start artifact.
 - [ ] Privacy scans include supported journal/metadata plus application/log surfaces.
