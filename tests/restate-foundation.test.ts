@@ -226,4 +226,12 @@ describe.sequential("Gate D Restate foundation vectors", () => {
       "UNSUPPORTED_SERIALIZER_VERSION",
     );
   }, 120_000);
+
+  it("GateD-V5 fails explicitly for unsupported runtime application version at direct ingress", async () => {
+    await expectUnsupportedVersion(
+      "v5-unsupported-runtime",
+      (input) => ({ ...input, runtimeApplicationVersion: "continuity-kernel-restate-gate-d-v2" }),
+      "UNSUPPORTED_RUNTIME_APPLICATION_VERSION",
+    );
+  }, 120_000);
 });
