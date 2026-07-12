@@ -142,7 +142,17 @@ interface ActorChildController {
   waitForProposal(timeoutMs: number): Promise<ProposalMessage>;
   kill(signal: "SIGKILL", timeoutMs: number): Promise<void>;
   waitForExit(timeoutMs: number): Promise<{ signal: string | null; exitCode: number | null }>;
-  getLaunchEvidence(): { argv: string[]; environmentKeys: string[]; stdout: string; stderr: string };
+  waitForClose(timeoutMs: number): Promise<{ signal: string | null; exitCode: number | null }>;
+  getLaunchEvidence(): {
+    spawnargs: string[];
+    suppliedEnvOwnKeyCount: number;
+    suppliedEnv: Record<string, string>;
+    parentSendCount: number;
+    outboundMessageCount: number;
+    firstOutboundMessage: unknown;
+    stdout: string;
+    stderr: string;
+  };
 }
 
 type CreateHarness = () => Promise<ActorIntegrationHarness>;
@@ -307,7 +317,7 @@ describe("frozen T4 Restate actor integration contract", () => {
     });
   }, 120_000);
 
-  it("T4-V2B preserves exact authoritative authorization rejections in isolated subcases", async () => {
+  it("T4R-V2B preserves exact authoritative authorization rejections in isolated subcases", async () => {
     const noArrange = () => Promise.resolve();
     const subcases = [
       { label: "revoked", code: "AUTHORIZATION_REVOKED", mutate: (value: ActorObservationV1) => value,
@@ -367,7 +377,7 @@ describe("frozen T4 Restate actor integration contract", () => {
     }
   }, 120_000);
 
-  it("T4-V3 records one accepted causal trace consistently across every available surface", async () => {
+  it("T4R-V3 records one accepted causal trace consistently across every available surface", async () => {
     const observation = await trustedObservation();
     const proposal = selectProposal(observation);
     const consequence = await executeObservation(observation, workflowId("v3-accepted"));
@@ -449,7 +459,7 @@ describe("frozen T4 Restate actor integration contract", () => {
     });
   }, 120_000);
 
-  it("T4-V4 returns the same stored acceptance for duplicate proposals on distinct workflows", async () => {
+  it("T4R-V4 returns the same stored acceptance for duplicate proposals on distinct workflows", async () => {
     const observation = await trustedObservation();
     const firstProposal = selectProposal(observation);
     const firstWorkflowId = workflowId("v4-first");
@@ -488,7 +498,7 @@ describe("frozen T4 Restate actor integration contract", () => {
     });
   }, 120_000);
 
-  it("T4-V5 rejects a stale proposal after one exact competing transition", async () => {
+  it("T4R-V5 rejects a stale proposal after one exact competing transition", async () => {
     const observation = await trustedObservation();
     const staleProposal = selectProposal(observation);
     const competingObservation = { ...observation, worldTime: "2026-07-11T10:00:01Z" };
@@ -539,7 +549,7 @@ describe("frozen T4 Restate actor integration contract", () => {
     });
   }, 120_000);
 
-  it("T4-V6 proves process-independent deterministic reproduction only, not restart or reacquisition", async () => {
+  it("T4R-V6 proves zero-inbound process-independent deterministic reproduction only, not restart or reacquisition", async () => {
     const observation = { ...await trustedObservation(), worldTime: "2026-07-11T10:00:02Z" };
     const parentProposal = selectProposal(observation);
     bindActorChildObservation(observation);
@@ -559,15 +569,36 @@ describe("frozen T4 Restate actor integration contract", () => {
       parentProposal.commandId,
       parentProposal.proposalDigest,
     ];
-    const expectSanitizedLaunch = (child: ActorChildController): void => {
+    const containsProhibitedLaunchValue = (child: ActorChildController): boolean => {
       const launch = child.getLaunchEvidence();
-      expect(Object.keys(launch).sort()).toEqual(["argv", "environmentKeys", "stderr", "stdout"]);
-      expect(launch.environmentKeys).toEqual(["NODE_ENV"]);
-      expect(launch.stdout).toBe("");
-      expect(launch.stderr).toBe("");
-      for (const argument of launch.argv) {
-        for (const prohibited of prohibitedLaunchValues) expect(argument).not.toContain(prohibited);
-      }
+      return launch.spawnargs.some((argument) => prohibitedLaunchValues.some((prohibited) => argument.includes(prohibited)));
+    };
+    const expectNoCapturedOutput = (child: ActorChildController): void => {
+      const launch = child.getLaunchEvidence();
+      expect(launch.stdout.length).toBe(0);
+      expect(launch.stderr.length).toBe(0);
+    };
+    const expectT4rPrivacyEvidence = (child: ActorChildController, firstOutboundMessage: ProposalMessage): void => {
+      const launch = child.getLaunchEvidence();
+      expect(Object.keys(launch).sort()).toEqual([
+        "firstOutboundMessage",
+        "outboundMessageCount",
+        "parentSendCount",
+        "spawnargs",
+        "stderr",
+        "stdout",
+        "suppliedEnv",
+        "suppliedEnvOwnKeyCount",
+      ]);
+      expect(launch.spawnargs.some((argument) => argument.includes("actor-child-runner"))).toBe(true);
+      expect(containsProhibitedLaunchValue(child)).toBe(false);
+      expect(Object.keys(launch.suppliedEnv)).toHaveLength(launch.suppliedEnvOwnKeyCount);
+      expect(Object.values(launch.suppliedEnv).every((value) => typeof value === "string")).toBe(true);
+      expect.soft(launch.parentSendCount).toBe(0);
+      expect.soft(launch.suppliedEnvOwnKeyCount).toBe(0);
+      expect(launch.outboundMessageCount).toBe(1);
+      expect(launch.firstOutboundMessage).toEqual(firstOutboundMessage);
+      expectNoCapturedOutput(child);
     };
     expect(() => spawnActorChild({
       ...observation,
@@ -586,8 +617,9 @@ describe("frozen T4 Restate actor integration contract", () => {
       expectOpenVersionThree(await harness.readCaseState());
     };
     const firstChild = spawnActorChild(observation);
-    expectSanitizedLaunch(firstChild);
+    expectNoCapturedOutput(firstChild);
     const firstMessage = await firstChild.waitForProposal(5_000);
+    expectT4rPrivacyEvidence(firstChild, firstMessage);
 
     expect(Object.keys(firstMessage).sort()).toEqual(["commandId", "proposalDigest", "type"]);
     expect(firstMessage).toEqual({
@@ -600,17 +632,20 @@ describe("frozen T4 Restate actor integration contract", () => {
     expect(firstIpc).not.toContain(fixture.authorizationGrantId);
     expect(firstIpc).not.toContain(requestHashes.completed);
     await firstChild.kill("SIGKILL", 5_000);
-    expect(await firstChild.waitForExit(5_000)).toMatchObject({ signal: "SIGKILL" });
+    expect(await firstChild.waitForClose(5_000)).toMatchObject({ signal: "SIGKILL" });
+    expectT4rPrivacyEvidence(firstChild, firstMessage);
     await expectNoChildEffects();
 
     const secondChild = spawnActorChild(structuredClone(observation));
-    expectSanitizedLaunch(secondChild);
+    expectNoCapturedOutput(secondChild);
     const secondMessage = await secondChild.waitForProposal(5_000);
+    expectT4rPrivacyEvidence(secondChild, secondMessage);
     expect(Object.keys(secondMessage).sort()).toEqual(["commandId", "proposalDigest", "type"]);
     expect(secondMessage).toEqual(firstMessage);
     expect(JSON.stringify(secondMessage)).toBe(firstIpc);
     await secondChild.kill("SIGKILL", 5_000);
-    expect(await secondChild.waitForExit(5_000)).toMatchObject({ signal: "SIGKILL" });
+    expect(await secondChild.waitForClose(5_000)).toMatchObject({ signal: "SIGKILL" });
+    expectT4rPrivacyEvidence(secondChild, secondMessage);
     await expectNoChildEffects();
 
     const consequence = await executeObservation(observation, workflowId("v6-parent-submit-once"));
