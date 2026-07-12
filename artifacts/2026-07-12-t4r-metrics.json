@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "experiment": "T4R",
-  "recordedAt": "2026-07-12T05:19:01.950Z",
+  "recordedAt": "2026-07-12T05:30:53.135Z",
   "sourceCommit": "32b9fe7fe0151e6bf9090a0c30a55b65f0afc292",
   "environment": {
     "node": "24.14.0",
@@ -13,66 +13,66 @@
     "pureProposalEvaluation": {
       "harnessInclusive": false,
       "rawMs": [
-        2.62,
-        0.15,
+        2.71,
+        0.14,
         0.08,
-        0.09,
-        0.09
+        0.08,
+        0.1
       ],
       "minMs": 0.08,
-      "medianMs": 0.09,
-      "maxMs": 2.62
+      "medianMs": 0.1,
+      "maxMs": 2.71
     },
     "deterministicRepeatEquality": {
       "equal": true,
       "harnessInclusive": false,
       "rawMs": [
-        0.09,
+        0.08,
         0.07,
         0.11,
-        0.14,
+        0.13,
         0.07
       ],
       "minMs": 0.07,
-      "medianMs": 0.09,
-      "maxMs": 0.14
+      "medianMs": 0.08,
+      "maxMs": 0.13
     },
     "acceptedConsequenceCompletion": {
       "harnessInclusive": true,
       "rawMs": [
-        95.47
+        113.8
       ],
-      "minMs": 95.47,
-      "medianMs": 95.47,
-      "maxMs": 95.47
+      "minMs": 113.8,
+      "medianMs": 113.8,
+      "maxMs": 113.8
     },
     "duplicateConsequenceCompletion": {
       "distinctWorkflowIds": true,
       "harnessInclusive": true,
       "rawMs": [
-        111.47
+        121.18
       ],
-      "minMs": 111.47,
-      "medianMs": 111.47,
-      "maxMs": 111.47
+      "minMs": 121.18,
+      "medianMs": 121.18,
+      "maxMs": 121.18
     },
     "staleRejectionCompletion": {
       "harnessInclusive": true,
       "rawMs": [
-        115.46
+        136.18
       ],
-      "minMs": 115.46,
-      "medianMs": 115.46,
-      "maxMs": 115.46
+      "minMs": 136.18,
+      "medianMs": 136.18,
+      "maxMs": 136.18
     },
     "processSpawnToReproducedProposal": {
       "harnessInclusive": true,
       "rawMs": [
-        381.78
+        524.07
       ],
-      "minMs": 381.78,
-      "medianMs": 381.78,
-      "maxMs": 381.78
+      "minMs": 524.07,
+      "medianMs": 524.07,
+      "maxMs": 524.07
     }
   },
   "privacyScan": {
