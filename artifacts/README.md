@@ -10,8 +10,10 @@ Sealed phase decisions live here. Prefer the newest dated final for the active p
 | T2b | `RESTATE_PASSES_V4` | `2026-07-11-t2b-final.md` |
 | Gate D | `GATE_D_PASSES_FOUNDATION_V3` | `2026-07-11-gate-d-final.md` |
 | Foundation review | `APPROVE_T4_DETERMINISTIC_ACTOR` | `2026-07-11-foundation-review.md` |
-| T4 | `T4_PASSES_DETERMINISTIC_ACTOR` | `2026-07-11-t4-final.md` |
-| Consumer gate | `CONSUMER_GATE_INTERNAL_PASS` | `2026-07-11-consumer-gate.md` |
+| T4 | `T4_INCOMPLETE_AT_BOUND` | `2026-07-12-t4-bound-review.md` |
+| Consumer gate | `CONSUMER_GATE_CANDIDATE_ONLY` | `2026-07-12-consumer-gate-review.md` |
+
+The 2026-07-12 reviews supersede the decision authority of the earlier T4 and consumer pass artifacts without deleting historical evidence.
 
 ## Artifact rules
 

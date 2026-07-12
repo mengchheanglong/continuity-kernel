@@ -8,8 +8,8 @@
 4. Read `docs/conformance-vectors.md` and `docs/implementation-matrix.md`.
 5. Read `docs/architecture/preflight-decisions.md`.
 6. Read `artifacts/2026-07-11-gate-d-final.md` for the foundation decision.
-7. Read `artifacts/2026-07-11-t4-final.md` for the actor decision.
-8. Read `artifacts/2026-07-11-consumer-gate.md` for the internal consumer/runbook decision.
+7. Read `artifacts/2026-07-12-t4-bound-review.md` for the corrected actor decision.
+8. Read `artifacts/2026-07-12-consumer-gate-review.md` for the corrected consumer status.
 9. For mission authority or research evidence, read the sibling files listed in `README.md`.
 
 ## Current phase
@@ -20,13 +20,13 @@ T1 CONTRACT/VECTORS/MATRIX FROZEN
 T2 COMPLETE — DBOS_REJECTED_PENDING_ALTERNATIVE — 6ceb5b1
 T2B COMPLETE — RESTATE_PASSES_V4
 GATE D COMPLETE — GATE_D_PASSES_FOUNDATION_V3
-T4 COMPLETE — T4_PASSES_DETERMINISTIC_ACTOR
-CONSUMER GATE COMPLETE — CONSUMER_GATE_INTERNAL_PASS
+T4 INCOMPLETE AT ORIGINAL BOUND — PRIOR PASS SUPERSEDED
+CONSUMER GATE CANDIDATE ONLY — PRIOR PASS SUPERSEDED
 CUSTOM PERSISTENCE PARKED
 T5 AND LATER LOCKED
 ```
 
-The latest sealed improvement is `artifacts/2026-07-11-consumer-gate.md`. Restate/PostgreSQL foundation V3 and T4 remain green. A thin reference consumer and runbook exist. Custom persistence remains parked. T5 is not started. External demand is not claimed. Frozen expected outcomes remain immutable.
+The latest authority is `artifacts/2026-07-12-t4-bound-review.md`. Gate D remains green. T4's code is promising and its tests pass, but its original bound closed without satisfying the frozen bidirectional IPC privacy, metrics, review, and push requirements. The consumer/runbook remains candidate work. Custom persistence remains parked, T5 is locked, and external demand is not claimed.
 
 ## Canonical rules
 
