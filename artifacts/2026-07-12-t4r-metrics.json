@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "experiment": "T4R",
+  "recordedAt": "2026-07-12T05:19:01.950Z",
+  "sourceCommit": "32b9fe7fe0151e6bf9090a0c30a55b65f0afc292",
+  "environment": {
+    "node": "24.14.0",
+    "pnpm": "10.32.1",
+    "restateServer": "1.7.2",
+    "postgres": "18.4"
+  },
+  "measurements": {
+    "pureProposalEvaluation": {
+      "harnessInclusive": false,
+      "rawMs": [
+        2.62,
+        0.15,
+        0.08,
+        0.09,
+        0.09
+      ],
+      "minMs": 0.08,
+      "medianMs": 0.09,
+      "maxMs": 2.62
+    },
+    "deterministicRepeatEquality": {
+      "equal": true,
+      "harnessInclusive": false,
+      "rawMs": [
+        0.09,
+        0.07,
+        0.11,
+        0.14,
+        0.07
+      ],
+      "minMs": 0.07,
+      "medianMs": 0.09,
+      "maxMs": 0.14
+    },
+    "acceptedConsequenceCompletion": {
+      "harnessInclusive": true,
+      "rawMs": [
+        95.47
+      ],
+      "minMs": 95.47,
+      "medianMs": 95.47,
+      "maxMs": 95.47
+    },
+    "duplicateConsequenceCompletion": {
+      "distinctWorkflowIds": true,
+      "harnessInclusive": true,
+      "rawMs": [
+        111.47
+      ],
+      "minMs": 111.47,
+      "medianMs": 111.47,
+      "maxMs": 111.47
+    },
+    "staleRejectionCompletion": {
+      "harnessInclusive": true,
+      "rawMs": [
+        115.46
+      ],
+      "minMs": 115.46,
+      "medianMs": 115.46,
+      "maxMs": 115.46
+    },
+    "processSpawnToReproducedProposal": {
+      "harnessInclusive": true,
+      "rawMs": [
+        381.78
+      ],
+      "minMs": 381.78,
+      "medianMs": 381.78,
+      "maxMs": 381.78
+    }
+  },
+  "privacyScan": {
+    "artifactForbiddenMatches": 0,
+    "stdoutCapturedBytesPersisted": 0,
+    "stderrCapturedBytesPersisted": 0
+  },
+  "cleanup": {
+    "actorChildren": 0,
+    "workers": 0,
+    "datasourceBackends": 0,
+    "advisoryLocks": 0
+  },
+  "limitations": [
+    "local synthetic measurements only",
+    "not a production SLO"
+  ]
+}
