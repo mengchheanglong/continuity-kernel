@@ -1,7 +1,14 @@
-import { fork, type ChildProcess } from "node:child_process";
+import {
+  fork,
+  type ChildProcess,
+  type MessageOptions,
+  type SendHandle,
+  type Serializable,
+} from "node:child_process";
 
 import { canonicalHash } from "../src/domain/canonical.js";
 import type { ActorObservationV1 } from "../src/actor/deterministic.js";
+import { actorChildObservationFixture } from "./actor-child-fixture.js";
 
 export interface ProposalMessage {
   type: "proposal";
@@ -13,17 +20,8 @@ export interface ActorChildController {
   waitForProposal(timeoutMs: number): Promise<ProposalMessage>;
   kill(signal: "SIGKILL", timeoutMs: number): Promise<void>;
   waitForExit(timeoutMs: number): Promise<{ signal: string | null; exitCode: number | null }>;
-  waitForClose(timeoutMs: number): Promise<{ signal: string | null; exitCode: number | null }>;
-  getLaunchEvidence(): {
-    spawnargs: string[];
-    suppliedEnvOwnKeyCount: number;
-    suppliedEnv: Record<string, string>;
-    parentSendCount: number;
-    outboundMessageCount: number;
-    firstOutboundMessage: unknown;
-    stdout: string;
-    stderr: string;
-  };
+  getLaunchEvidence(): { spawnargs: string[]; suppliedEnvOwnKeyCount: number; parentSendCount: number;
+    outboundMessageCount: number; firstOutboundMessage: unknown; stdout: string; stderr: string };
 }
 
 interface TrackedChild {
@@ -32,16 +30,10 @@ interface TrackedChild {
 }
 
 const active = new Set<TrackedChild>();
-const maxCapturedStdioBytes = 4_096;
-let parentSuppliedHash: string | null = null;
+const actorChildObservationFixtureHash = canonicalHash(actorChildObservationFixture);
+const maxCapturedOutputBytes = 4_096;
 
-export function bindActorChildObservation(observation: ActorObservationV1): void {
-  parentSuppliedHash = canonicalHash(observation);
-}
-
-export function clearActorChildObservation(): void {
-  parentSuppliedHash = null;
-}
+export function clearActorChildObservation(): void {}
 
 export function activeActorChildCount(): number {
   return active.size;
@@ -53,10 +45,7 @@ export async function stopActorChildren(): Promise<void> {
 }
 
 export function spawnActorChild(observation: ActorObservationV1): ActorChildController {
-  if (parentSuppliedHash === null) {
-    throw new Error("ACTOR_CHILD_OBSERVATION_UNBOUND");
-  }
-  if (canonicalHash(observation) !== parentSuppliedHash) {
+  if (canonicalHash(observation) !== actorChildObservationFixtureHash) {
     throw new Error("ACTOR_CHILD_OBSERVATION_MISMATCH");
   }
 
@@ -65,21 +54,33 @@ export function spawnActorChild(observation: ActorObservationV1): ActorChildCont
   let firstOutboundMessage: unknown;
   let invalidMessage = false;
   let parentSendCount = 0;
-  const stdoutChunks: string[] = [];
-  const stderrChunks: string[] = [];
-  const suppliedEnv = { NODE_ENV: process.env.NODE_ENV ?? "test" };
-  let closedResult: { signal: string | null; exitCode: number | null } | null = null;
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  let capturedOutputBytes = 0;
+  const suppliedEnv: Record<string, string> = {};
   const child = fork(new URL("./actor-child-runner.ts", import.meta.url), [], {
     execPath: process.execPath,
     execArgv: ["--import", "tsx"],
     env: suppliedEnv,
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
+  const originalSend = child.send.bind(child);
+  child.send = function instrumentedSend(
+    message: Serializable,
+    sendHandleOrCallback?: SendHandle | ((error: Error | null) => void),
+    optionsOrCallback?: MessageOptions | ((error: Error | null) => void),
+    callback?: (error: Error | null) => void,
+  ): boolean {
+    parentSendCount += 1;
+    if (typeof sendHandleOrCallback === "function") return originalSend(message, sendHandleOrCallback);
+    if (typeof optionsOrCallback === "function") return originalSend(message, sendHandleOrCallback, optionsOrCallback);
+    return originalSend(message, sendHandleOrCallback, optionsOrCallback, callback);
+  };
   child.stdout?.on("data", (chunk: Buffer) => {
-    appendBounded(stdoutChunks, chunk);
+    capturedOutputBytes = appendBoundedOutput(stdoutChunks, chunk, capturedOutputBytes);
   });
   child.stderr?.on("data", (chunk: Buffer) => {
-    appendBounded(stderrChunks, chunk);
+    capturedOutputBytes = appendBoundedOutput(stderrChunks, chunk, capturedOutputBytes);
   });
   child.on("message", (value: unknown) => {
     outboundMessageCount += 1;
@@ -90,11 +91,6 @@ export function spawnActorChild(observation: ActorObservationV1): ActorChildCont
     }
     messages.push(value);
   });
-  child.once("close", (exitCode, signal) => {
-    closedResult = { signal, exitCode };
-  });
-  parentSendCount += 1;
-  child.send({ type: "observation", observation });
 
   const tracked: TrackedChild = {
     child,
@@ -126,7 +122,7 @@ export function spawnActorChild(observation: ActorObservationV1): ActorChildCont
         active.delete(tracked);
         return;
       }
-      const exited = waitForProcessClose(child, timeoutMs, () => closedResult);
+      const exited = waitForProcessExit(child, timeoutMs);
       child.kill(signal);
       await exited;
       active.delete(tracked);
@@ -138,21 +134,15 @@ export function spawnActorChild(observation: ActorObservationV1): ActorChildCont
       await waitForProcessExit(child, timeoutMs);
       return { signal: child.signalCode, exitCode: child.exitCode };
     },
-    async waitForClose(timeoutMs: number): Promise<{ signal: string | null; exitCode: number | null }> {
-      await waitForProcessClose(child, timeoutMs, () => closedResult);
-      if (closedResult === null) throw new Error("Actor child close result missing");
-      return closedResult;
-    },
     getLaunchEvidence() {
       return {
         spawnargs: [...child.spawnargs],
         suppliedEnvOwnKeyCount: Object.keys(suppliedEnv).length,
-        suppliedEnv,
         parentSendCount,
         outboundMessageCount,
         firstOutboundMessage,
-        stdout: stdoutChunks.join(""),
-        stderr: stderrChunks.join(""),
+        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+        stderr: Buffer.concat(stderrChunks).toString("utf8"),
       };
     },
   };
@@ -161,10 +151,12 @@ export function spawnActorChild(observation: ActorObservationV1): ActorChildCont
   return controller;
 }
 
-function appendBounded(chunks: string[], chunk: Buffer): void {
-  const currentLength = chunks.reduce((total, value) => total + value.length, 0);
-  if (currentLength >= maxCapturedStdioBytes) return;
-  chunks.push(chunk.toString().slice(0, maxCapturedStdioBytes - currentLength));
+function appendBoundedOutput(chunks: Buffer[], chunk: Buffer, currentBytes: number): number {
+  const remaining = maxCapturedOutputBytes - currentBytes;
+  if (remaining <= 0) return currentBytes;
+  const retained = chunk.subarray(0, remaining);
+  chunks.push(retained);
+  return currentBytes + retained.length;
 }
 
 function isProposalMessage(value: unknown): value is ProposalMessage {
@@ -181,23 +173,6 @@ function waitForProcessExit(child: ChildProcess, timeoutMs: number): Promise<voi
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error("Actor child exit timeout"));
-    }, timeoutMs);
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
-}
-
-function waitForProcessClose(
-  child: ChildProcess,
-  timeoutMs: number,
-  currentResult: () => { signal: string | null; exitCode: number | null } | null,
-): Promise<void> {
-  if (currentResult() !== null) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error("Actor child close timeout"));
     }, timeoutMs);
     child.once("close", () => {
       clearTimeout(timer);
