@@ -2,7 +2,8 @@
 
 **Audience:** a second engineer (or future you) on a clean machine.  
 **Data:** synthetic only.  
-**Scope:** contract verification and the thin reference consumer. Not a product deploy guide.
+**Scope:** contract verification and the thin reference consumer. Not a product deploy guide.  
+**Current sealed status:** Gate D passed; original T4 incomplete at bound; T4R correction passed; consumer candidate only.
 
 ## What this repository is
 
@@ -22,7 +23,7 @@ Public positioning:
 | Restate TS SDK/client | `1.15.1` |
 | PostgreSQL | compose image digest on port `55432` |
 
-## One-time setup
+## One-time setup (~target: 30 minutes on a prepared machine)
 
 ```bash
 pnpm install
@@ -42,7 +43,9 @@ Restate runs in Linux containers and must reach the host Node endpoint on port `
 CK_RESTATE_DEPLOYMENT_URI=http://<non-loopback-host-ip>:9080
 ```
 
-Gate D and T4 evidence on this host used `http://172.23.32.1:9080`.
+Gate D and T4/T4R evidence on the founder host used `http://172.23.32.1:9080`.
+
+If Docker Desktop is stopped, doctor will fail with connection refused. That is an environment prerequisite failure, not a continuity-vector failure.
 
 ## Verification packs
 
@@ -53,7 +56,7 @@ export CK_RESTATE_DEPLOYMENT_URI=http://<host-ip>:9080
 pnpm run test:gate-d
 ```
 
-Deterministic actor (16 tests):
+Deterministic actor / T4R suite (16 tests):
 
 ```bash
 pnpm run test:t4
@@ -67,24 +70,40 @@ pnpm run lint
 pnpm run build
 ```
 
-## Reference consumer (consumer gate)
+## Reference consumer (candidate only)
 
 ```bash
 pnpm run example:consumer
 ```
 
-See `examples/reference-consumer/README.md`. This is the in-repo **second consumer** of the public commit path. It does not open T5.
+See `examples/reference-consumer/README.md`. This is the in-repo **second consumer** of the public commit path. Sealed status remains `CONSUMER_GATE_CANDIDATE_ONLY`. It does not open T5 and does not prove an external consumer.
+
+Known candidate gaps (do not hide them):
+
+- imports test fixture/worker helpers;
+- duplicate evidence currently uses a namespace-wide receipt count;
+- worker cleanup may time out silently;
+- doctor does not yet verify endpoint `:9080`, deployment registration, or container-to-host identity.
 
 ## Read order for humans
 
 1. `README.md`
-2. `docs/non-claims.md`
-3. `docs/invariants.md`
-4. `docs/conformance-vectors.md`
-5. `artifacts/2026-07-11-gate-d-final.md`
-6. `artifacts/2026-07-11-t4-final.md`
-7. This runbook
+2. `docs/public-safe-overview.md`
+3. `docs/architecture-overview.md`
+4. `docs/non-claims.md`
+5. `docs/invariants.md`
+6. `docs/conformance-vectors.md`
+7. `artifacts/2026-07-11-gate-d-final.md`
+8. `artifacts/2026-07-12-t4-bound-review.md`
+9. `artifacts/2026-07-12-t4r-final.md`
+10. `artifacts/2026-07-12-consumer-gate-review.md`
+11. This runbook
+12. `docs/publication-blockers.md`
+
+`artifacts/2026-07-11-t4-final.md` is historical process evidence and is superseded for actor outcome authority by the T4 bound review + T4R final.
+
+`docs/implementation-matrix.md` is frozen T2 historical evidence. Do not treat its “NOT_STARTED” scaffolding language as current project status.
 
 ## Explicitly out of scope here
 
-LLM, memory product, multi-agent world, Unity/3D, real personal data, custom persistence, consciousness claims.
+LLM product, memory product, multi-agent world, Unity/3D, real personal data, custom persistence, consciousness claims, demand claims.
