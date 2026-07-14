@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "experiment": "agent-continuity-spike-v0",
+  "outcome": "AGENT_CONTINUITY_SPIKE_V0_PASS_SCRIPTED_ADAPTER",
+  "sourceCommit": "b21ea25c405fb8d12ebc4ebd53b457c08ad5470e",
+  "startedAt": "2026-07-14T15:55:06Z",
+  "completedAt": "2026-07-14T17:38:05Z",
+  "elapsedMs": 1831,
+  "idleTargetMs": 1000,
+  "idleDurationMs": 1005,
+  "idleAgentAdapterCalls": 0,
+  "totalAgentAdapterCalls": 1,
+  "totalProviderCalls": 0,
+  "providerIntegrationPresent": false,
+  "networkTopologyValid": true,
+  "staticProviderFreeProofPassed": true,
+  "staticNoNewDependencyPassed": true,
+  "workingSetBytes": 299,
+  "rawFileContentPersisted": false,
+  "rawFileContentInCapturedLogs": false,
+  "firstCommitStatus": "accepted",
+  "firstDecisionCode": "ACCEPTED",
+  "caseVersionAfter": "4",
+  "commandReceiptCount": 1,
+  "acceptedHistoryCountForCommand": 1,
+  "duplicateConsequenceCount": 0,
+  "reconstructionConsequenceCount": 0,
+  "checkpointSchemaValid": true,
+  "checkpointBytes": 285,
+  "tempWatchedFileDeleted": true,
+  "tempCheckpointDeleted": true,
+  "workerCleanupComplete": true,
+  "postCleanupWorkerCount": 0,
+  "capturedLogsDisposed": true,
+  "capturedLogBufferBytesAfterDisposal": 0,
+  "artifactSchemaValid": true,
+  "requiredCommands": [
+    {
+      "command": "pnpm exec vitest run tests/agent-continuity-spike.test.ts --no-file-parallelism --bail=1",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run lint",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run build",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run test:gate-d",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run test:t4",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run example:agent-continuity-spike",
+      "exitCode": 0
+    }
+  ]
+}
